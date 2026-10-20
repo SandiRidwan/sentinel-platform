@@ -1,0 +1,45 @@
+# SENTINEL — core dependencies. Python 3.11.
+# Heavy/optional targets (Spark, cloud warehouse adapters) live in requirements-extra.txt.
+
+# --- ingestion ---
+scrapy==2.13.3
+curl_cffi==0.13.0
+requests==2.32.5
+w3lib==2.3.1
+
+# --- transform / modeling ---
+dbt-core==1.9.8
+dbt-duckdb==1.9.4
+duckdb==1.4.1
+pandas==2.3.3
+pyarrow==21.0.0
+pyiceberg==0.9.1
+
+# --- storage / databases ---
+boto3==1.40.45
+psycopg2-binary==2.9.11
+clickhouse-connect==0.8.18
+
+# --- quality ---
+great_expectations==0.18.22
+pytest==8.4.2
+pytest-cov==7.0.0
+
+# --- service / api ---
+fastapi==0.119.0
+uvicorn==0.37.0
+pydantic==2.12.4
+python-dotenv==1.1.1
+pyyaml==6.0.3
+httpx==0.28.1
+
+# --- observability ---
+opentelemetry-sdk==1.37.0
+opentelemetry-exporter-otlp-proto-grpc==1.37.0
+opentelemetry-instrumentation-requests==0.58b0
+prometheus-client==0.23.1
+
+# --- dev tooling ---
+ruff==0.14.2
+mypy==1.18.2
+types-requests==2.32.4.20250913

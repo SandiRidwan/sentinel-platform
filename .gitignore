@@ -1,0 +1,64 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- dbt ---
+transform/dbt/target/
+transform/dbt/dbt_packages/
+transform/dbt/logs/
+transform/dbt/.user.yml
+
+# --- Airflow ---
+orchestration/logs/
+airflow.cfg
+airflow.db
+webserver_config.py
+
+# --- Spark / Iceberg / warehouse ---
+spark-warehouse/
+metastore_db/
+derby.log
+*.parquet
+data/lake/
+data/warehouse/
+
+# --- secrets ---
+.env
+*.pem
+*.key
+credentials.json
+service-account*.json
+profiles.yml
+
+# --- infra state ---
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+*.tfvars
+
+# --- build / tooling ---
+node_modules/
+bin/
+*.exe
+dist/
+.DS_Store
+Thumbs.db
+
+# --- reports (generated, tracked selectively) ---
+quality/reports/*.json
+!quality/reports/.gitkeep
+governance/lineage/events/*.jsonl
+!governance/lineage/events/.gitkeep

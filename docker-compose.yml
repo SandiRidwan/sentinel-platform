@@ -1,0 +1,101 @@
+# SENTINEL — local stack. No cloud spend.
+#
+# Object storage note: MinIO withdrew its public Docker images in 2026, so the local
+# S3 endpoint is adobe/s3mock — a real S3 API implementation used for SDK testing.
+# The application code only knows S3_ENDPOINT + credentials, so pointing it at real
+# AWS S3 or a MinIO cluster is a config change, not a code change. See
+# docs/adr/0004-local-object-store.md.
+#
+# Airflow, Spark and the Go fetcher join in later milestones.
+name: ${COMPOSE_PROJECT_NAME:-sentinel}
+
+services:
+  s3:
+    image: adobe/s3mock:5.2.3
+    # No bind mount: s3mock runs as a non-root buildpack user, and a root-owned named
+    # volume makes its store unreadable (ListBuckets -> InternalError). The local mock
+    # is not a system of record, so it keeps state in the container layer.
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${S3_BUCKET_RAW:-sentinel-raw},${S3_BUCKET_BRONZE:-sentinel-bronze},${S3_BUCKET_SILVER:-sentinel-silver}
+      COM_ADOBE_TESTING_S3MOCK_STORE_REGION: ${S3_REGION:-us-east-1}
+    ports:
+      - "9090:9090"   # S3 API (HTTP)
+      - "9191:9191"   # S3 API (HTTPS)
+    healthcheck:
+      # The S3 API answers a service list at the root with an XML body.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/ | grep -q ListAllMyBucketsResult || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17.4-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./tools/seed/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.4-alpine
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-sentinel}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-change-me-clickhouse}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"   # HTTP
+      - "9002:9000"   # native
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./analytics/clickhouse/ddl:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # 127.0.0.1, not localhost: inside the container localhost resolves to ::1 first
+      # and ClickHouse listens on IPv4.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  metabase:
+    image: metabase/metabase:v0.55.5
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: ${POSTGRES_USER:-sentinel}
+      MB_DB_PASS: ${POSTGRES_PASSWORD:-change-me-postgres}
+      MB_SITE_NAME: SENTINEL
+      MB_ANON_TRACKING_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  clickhouse-data:

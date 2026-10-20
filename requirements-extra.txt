@@ -1,0 +1,13 @@
+# SENTINEL — heavy / optional dependencies.
+# Install only when working the relevant milestone:
+#   pip install -r requirements-extra.txt            # Spark (M5) + cloud warehouse adapters (M6)
+#
+# PySpark needs a JDK. Tested JDK range for PySpark 3.5 is 8/11/17.
+# If the machine has a newer JDK, set JAVA_HOME to a 17 install before running Spark.
+
+pyspark==3.5.7
+
+# dbt adapters for the cloud targets (M6). The local `dev` target uses dbt-duckdb
+# from requirements.txt, so the pipeline runs with neither of these installed.
+dbt-bigquery==1.9.1
+dbt-snowflake==1.9.4
