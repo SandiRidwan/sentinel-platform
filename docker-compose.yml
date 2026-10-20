@@ -29,6 +29,29 @@ services:
       retries: 20
     restart: unless-stopped
 
+  go-fetcher:
+    build:
+      context: ./ingestion/go-fetcher
+    environment:
+      PORT: "8088"
+      FINGERPRINT_PROFILE: ${FINGERPRINT_PROFILE:-chrome}
+      FINGERPRINT_PLATFORM: ${FINGERPRINT_PLATFORM:-windows}
+      RATE_PER_SECOND: ${FETCHER_RATE_PER_SECOND:-5}
+      RATE_BURST: "10"
+      MAX_CONCURRENCY: ${FETCHER_MAX_CONCURRENCY:-16}
+      REQUEST_TIMEOUT_MS: "20000"
+      # Production reads this from governance/sources.yml.
+      FETCH_ALLOWED_HOSTS: ${FETCH_ALLOWED_HOSTS:-books.toscrape.com,quotes.toscrape.com,scrapethissite.com}
+    ports:
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8088/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   postgres:
     image: postgres:17.4-alpine
     environment:
