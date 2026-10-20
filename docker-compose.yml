@@ -36,7 +36,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sentinel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
     ports:
-      - "5432:5432"
+      # Host port 5433, not 5432: many developer machines already run a native Postgres
+      # on 5432, and it listens on ::1 while Docker publishes on IPv4. "localhost" then
+      # resolves to the native server and auth fails confusingly. See ADR 0005.
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./tools/seed/sql:/docker-entrypoint-initdb.d:ro

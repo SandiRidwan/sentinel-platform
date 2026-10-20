@@ -1,0 +1,79 @@
+# SENTINEL — source register. THE GATE.
+#
+# Ingestion refuses to crawl a host that is not declared here with `approved: true`.
+# This file is the reason the platform can be described as governed rather than just
+# fast: the decision to scrape a given site is written down, with its basis, before a
+# single request is made.
+#
+# `robots_status` values:
+#   allow_all        robots.txt permits the paths used
+#   api_permitted    the source is consumed through an official API, not HTML crawling
+#   restricted       robots.txt restricts crawling; API or explicit permission only
+#
+# Reviewed: 2026-10-20
+
+version: 1
+reviewed_at: "2026-10-20"
+
+sources:
+  books:
+    host: books.toscrape.com
+    display_name: Books to Scrape
+    purpose: >-
+      Sandbox catalogue published by Zyte/Scrapinghub specifically so that crawlers can be
+      developed and tested against it. Publishers intend it to be scraped.
+    robots_status: allow_all
+    legal_basis: publisher_intent
+    approved: true
+    rate_limit_rps: 0.5
+    allowed_paths: ["/"]
+    notes: >-
+      Static HTML, paginated catalogue plus per-book detail pages. Used for the primary
+      product schema (title, price, availability, rating) and the category dimension.
+
+  quotes:
+    host: quotes.toscrape.com
+    display_name: Quotes to Scrape
+    purpose: >-
+      Sandbox published for scraping practice. Used to exercise text extraction and
+      tag-list handling.
+    robots_status: allow_all
+    legal_basis: publisher_intent
+    approved: true
+    rate_limit_rps: 0.5
+    allowed_paths: ["/"]
+    notes: Static HTML, paginated list plus author pages.
+
+  countries:
+    host: scrapethissite.com
+    display_name: Scrape This Site
+    purpose: >-
+      Sandbox site published explicitly for scraping exercises. Provides tabular country and
+      hockey data, which is what the warehouse models are shaped around.
+    robots_status: allow_all
+    legal_basis: publisher_intent
+    approved: true
+    rate_limit_rps: 0.5
+    allowed_paths: ["/pages/simple/", "/pages/forms/", "/pages/advanced/"]
+    notes: >-
+      robots.txt disallows only /lessons/ and /faq/; the /pages/ datasets are the point of
+      the site. Two schemas: countries (name, capital, population, area) and hockey teams.
+
+# Hosts that were considered and rejected. Kept so the decision is not re-litigated
+# silently later, and so the register records what was actually checked.
+rejected:
+  - host: en.wikipedia.org
+    reason: >-
+      robots.txt for User-agent: * sets "Disallow: /w/", which covers /w/api.php — the API
+      endpoint this platform would use. api_permitted was assumed at first draft and was
+      wrong. Removed rather than given an exception: the point of obeying robots.txt is
+      that it is not carved up when a source is convenient.
+  - host: openlibrary.org
+    reason: >-
+      robots.txt disallows /api and /search, which are the only useful endpoints.
+  - host: linkedin.com
+    reason: Terms of Service prohibit automated collection.
+  - host: facebook.com
+    reason: Terms of Service prohibit automated collection; requires authenticated session.
+  - host: twitter.com
+    reason: Terms of Service prohibit automated collection; requires authenticated session.

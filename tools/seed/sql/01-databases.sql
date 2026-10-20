@@ -14,18 +14,20 @@ CREATE SCHEMA IF NOT EXISTS silver;
 CREATE SCHEMA IF NOT EXISTS gold;
 CREATE SCHEMA IF NOT EXISTS governance;
 
--- Audit table: every ingestion run writes one row. Governance reads it for lineage
--- and the retention job prunes by run_date.
+-- Audit table: every ingestion run writes one row PER SPIDER. The primary key is
+-- (run_id, spider), not run_id alone — a single run covers several spiders, and a
+-- run_id-only key silently discards every spider after the first.
 CREATE TABLE IF NOT EXISTS governance.ingest_run (
-    run_id          UUID PRIMARY KEY,
-    source          TEXT        NOT NULL,
+    run_id          UUID        NOT NULL,
     spider          TEXT        NOT NULL,
+    source          TEXT        NOT NULL,
     started_at      TIMESTAMPTZ NOT NULL,
     finished_at     TIMESTAMPTZ,
     status          TEXT        NOT NULL DEFAULT 'running',
     rows_landed     BIGINT      NOT NULL DEFAULT 0,
     rows_rejected   BIGINT      NOT NULL DEFAULT 0,
     error           TEXT,
+    PRIMARY KEY (run_id, spider),
     CONSTRAINT ingest_run_status_check CHECK (status IN ('running', 'success', 'failed'))
 );
 

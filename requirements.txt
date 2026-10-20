@@ -2,7 +2,10 @@
 # Heavy/optional targets (Spark, cloud warehouse adapters) live in requirements-extra.txt.
 
 # --- ingestion ---
+# Twisted is pinned: Scrapy 2.13 imports twisted.internet._sslverify._setAcceptableProtocols,
+# which Twisted 26 removed. Pinning here keeps the crawler importable.
 scrapy==2.13.3
+Twisted==24.11.0
 curl_cffi==0.13.0
 requests==2.32.5
 w3lib==2.3.1

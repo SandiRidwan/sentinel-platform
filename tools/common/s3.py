@@ -32,9 +32,11 @@ def s3_client():
         region_name=settings.s3.region,
         config=BotoConfig(
             s3={"addressing_style": "path" if settings.s3.force_path_style else "virtual"},
-            retries={"max_attempts": 5, "mode": "standard"},
-            connect_timeout=10,
-            read_timeout=30,
+            # Fail fast. A dead endpoint should surface in seconds, not hang a crawl for
+            # minutes while boto retries with long timeouts.
+            retries={"max_attempts": 2, "mode": "standard"},
+            connect_timeout=5,
+            read_timeout=20,
         ),
     )
 
