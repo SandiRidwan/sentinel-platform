@@ -1,0 +1,36 @@
+# Extra dependencies for the Airflow image.
+#
+# Kept deliberately small. Airflow's base image already pins a large tree, and adding a
+# package with a wide dependency graph (great_expectations pulls its own pandas/numpy/
+# jupyter pins) makes pip's resolver exceed its recursion limit — observed as
+# "ResolutionTooDeep: 200000" at image build time.
+#
+# Consequence, stated plainly: quality level 4 (expectations) does NOT run inside this
+# image. The quality_gate DAG invokes it as a separate process/container
+# (requirements.txt has the full set). The scheduler triggers work; it does not have to
+# be able to import every library the platform owns.
+#
+# Version pins are intentionally loose here: Airflow's own constraints file is the
+# authority in this image, and fighting it with hard pins is how the resolver breaks.
+
+# ingestion (the DAG runs the spider entrypoint as a subprocess of this interpreter)
+scrapy==2.13.3
+Twisted==24.11.0
+curl_cffi
+w3lib
+
+# transform
+dbt-core==1.9.8
+dbt-duckdb==1.9.4
+duckdb
+pandas
+pyarrow
+
+# storage
+boto3
+psycopg2-binary
+clickhouse-connect
+
+# config
+pyyaml
+python-dotenv
