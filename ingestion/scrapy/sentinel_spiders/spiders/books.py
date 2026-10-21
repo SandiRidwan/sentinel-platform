@@ -42,10 +42,7 @@ class BooksSpider(scrapy.Spider):
             yield response.follow(
                 link,
                 callback=self.parse_book,
-                cb_kwargs={
-                    "rating_word": _rating_word(card),
-                    "category": _category(response),
-                },
+                cb_kwargs={"rating_word": _rating_word(card)},
             )
 
         next_page = response.css("li.next a::attr(href)").get()
@@ -72,7 +69,10 @@ class BooksSpider(scrapy.Spider):
             availability=" ".join(part.strip() for part in availability_raw if part.strip()) or None,
             stock_count=_stock_count(availability_raw),
             rating=RATING_WORDS.get(rating_word or ""),
-            category=category,
+            # Read the category from the DETAIL page breadcrumb. On the catalogue page the
+            # third breadcrumb item is "Page N of 50" with no link, so reading it there
+            # returned None for every book — which is what the warehouse showed before.
+            category=_category(response),
             upc=_table_value(response, "UPC"),
             scraped_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )

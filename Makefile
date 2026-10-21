@@ -7,17 +7,15 @@ RUN := $(PY) -m tools.tasks.runner
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor up down restart logs seed scrape quality test docs lineage \
-        infra-plan infra-destroy k8s-up k8s-down clean all
+        clickhouse-load metabase-import infra-plan infra-destroy k8s-up k8s-down clean all
 
 help:            ## show this help
-	@echo "SENTINEL tasks:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@$(RUN) help
 
 doctor:          ## verify every tool and service the platform needs
 	$(RUN) doctor
 
-up:              ## start the local stack (MinIO, Postgres, ClickHouse, Metabase)
+up:              ## start the local stack
 	$(RUN) up
 
 down:            ## stop the local stack (keeps volumes)
@@ -29,10 +27,10 @@ restart:         ## restart the local stack
 logs:            ## tail stack logs
 	$(RUN) logs
 
-seed:            ## create buckets, databases, seed reference data
+seed:            ## create buckets and databases
 	$(RUN) seed
 
-scrape:          ## run the Scrapy spiders against declared sources
+scrape:          ## run the spiders against declared sources
 	$(RUN) scrape
 
 quality:         ## run all four quality levels
@@ -41,8 +39,14 @@ quality:         ## run all four quality levels
 test:            ## run unit tests only (fast)
 	$(RUN) test
 
-docs:            ## regenerate dbt docs and lineage
+docs:            ## regenerate dbt docs
 	$(RUN) docs
+
+clickhouse-load: ## load gold into ClickHouse
+	$(RUN) clickhouse-load
+
+metabase-import: ## create Metabase dashboards from JSON
+	$(RUN) metabase-import
 
 lineage:         ## emit and render the lineage graph
 	$(RUN) lineage

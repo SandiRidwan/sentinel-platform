@@ -34,8 +34,21 @@ def dbt_env() -> dict[str, str]:
     return env
 
 
+def silver_root() -> str:
+    """Absolute path to the silver zone.
+
+    dbt views materialise the path they were compiled with. A relative path is baked into
+    the view, so the view only resolves while the process cwd happens to be the dbt project
+    directory — which is true for `dbt run` and false for anything reading the warehouse
+    afterwards. Absolute is the only version that survives both.
+    """
+    return (ROOT / "data" / "staging" / "zones" / "silver").as_posix()
+
+
 def run_dbt(args: list[str]) -> int:
     cmd = [sys.executable, "-m", "dbt.cli.main", *args]
+    if "--vars" not in args:
+        cmd.extend(["--vars", f'{{"silver_root": "{silver_root()}"}}'])
     print(f">> dbt {' '.join(args)}  (target={dbt_env()['DBT_TARGET']})")
 
     completed = subprocess.run(

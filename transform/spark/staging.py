@@ -39,9 +39,9 @@ def download_prefix(bucket: str, prefix: str) -> list[Path]:
             continue
         dest = root / bucket / key
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists() and dest.stat().st_size > 0:
-            written.append(dest)
-            continue
+        # Always re-download. A staging area that keeps a file just because one already
+        # exists at that path silently serves yesterday's data after a re-scrape, and the
+        # symptom is a warehouse that disagrees with the source with no error anywhere.
         client.download_file(bucket, key, str(dest))
         written.append(dest)
 

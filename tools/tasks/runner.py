@@ -203,6 +203,7 @@ def _compose_files() -> list[str]:
 
 
 def cmd_up(_args: argparse.Namespace) -> int:
+    """Start the local stack (S3, Postgres, ClickHouse, Metabase, Airflow, go-fetcher)."""
     header("starting local stack")
     run(["docker", "compose", *_compose_files(), "up", "-d", "--wait"])
     ok("stack is up")
@@ -210,6 +211,7 @@ def cmd_up(_args: argparse.Namespace) -> int:
 
 
 def cmd_down(_args: argparse.Namespace) -> int:
+    """Stop the local stack, keeping volumes."""
     header("stopping local stack")
     run(["docker", "compose", *_compose_files(), "down"])
     ok("stack is down (volumes kept)")
@@ -217,17 +219,20 @@ def cmd_down(_args: argparse.Namespace) -> int:
 
 
 def cmd_restart(_args: argparse.Namespace) -> int:
+    """Restart the local stack."""
     header("restarting local stack")
     run(["docker", "compose", *_compose_files(), "restart"])
     return 0
 
 
 def cmd_logs(_args: argparse.Namespace) -> int:
+    """Tail stack logs."""
     run(["docker", "compose", *_compose_files(), "logs", "--tail=100", "-f"])
     return 0
 
 
 def cmd_seed(_args: argparse.Namespace) -> int:
+    """Create buckets and database objects."""
     header("seeding buckets and databases")
     run([PY, "-m", "tools.seed"])
     ok("seed complete")
@@ -235,12 +240,14 @@ def cmd_seed(_args: argparse.Namespace) -> int:
 
 
 def cmd_scrape(_args: argparse.Namespace) -> int:
+    """Run the spiders against declared sources."""
     header("running spiders")
     run([PY, "-m", "ingestion.scrapy.sentinel_spiders.run_ingest"])
     return 0
 
 
 def cmd_quality(_args: argparse.Namespace) -> int:
+    """Run all four quality levels; fail if any level fails."""
     header("quality — all four levels")
     rc = 0
     for label, cmd in [
@@ -263,22 +270,40 @@ def cmd_quality(_args: argparse.Namespace) -> int:
 
 
 def cmd_test(_args: argparse.Namespace) -> int:
+    """Run unit tests only (fast)."""
     return run([PY, "-m", "pytest", "quality/unit", "-q"], check=False).returncode
 
 
 def cmd_docs(_args: argparse.Namespace) -> int:
+    """Regenerate dbt docs."""
     header("generating dbt docs")
     run([PY, "-m", "tools.tasks.dbt", "docs", "generate"])
     return 0
 
 
+def cmd_clickhouse_load(_args: argparse.Namespace) -> int:
+    """Load the gold layer into ClickHouse."""
+    header("loading clickhouse")
+    run([PY, "-m", "analytics.clickhouse.load"])
+    return 0
+
+
+def cmd_metabase_import(_args: argparse.Namespace) -> int:
+    """Create the Metabase dashboards from their JSON definitions."""
+    header("importing metabase dashboards")
+    run([PY, "-m", "analytics.metabase.import_dashboards"])
+    return 0
+
+
 def cmd_lineage(_args: argparse.Namespace) -> int:
+    """Emit and render the lineage graph."""
     header("lineage")
     run([PY, "-m", "tools.lineage"])
     return 0
 
 
 def cmd_infra_plan(_args: argparse.Namespace) -> int:
+    """terraform plan for the dev environment."""
     header("terraform plan (dev)")
     run(["terraform", "init", "-input=false"], cwd=ROOT / "infra" / "terraform")
     run(["terraform", "plan", "-input=false", "-var-file=dev.tfvars"], cwd=ROOT / "infra" / "terraform")
@@ -286,6 +311,7 @@ def cmd_infra_plan(_args: argparse.Namespace) -> int:
 
 
 def cmd_infra_destroy(_args: argparse.Namespace) -> int:
+    """terraform destroy for the dev environment."""
     header("terraform destroy (dev)")
     run(["terraform", "destroy", "-auto-approve", "-input=false", "-var-file=dev.tfvars"],
         cwd=ROOT / "infra" / "terraform")
@@ -293,18 +319,21 @@ def cmd_infra_destroy(_args: argparse.Namespace) -> int:
 
 
 def cmd_k8s_up(_args: argparse.Namespace) -> int:
+    """Deploy the stack to a local kind cluster."""
     header("deploying to local kind cluster")
     run([PY, "-m", "tools.tasks.k8s", "up"])
     return 0
 
 
 def cmd_k8s_down(_args: argparse.Namespace) -> int:
+    """Remove the local kind cluster."""
     header("removing local kind cluster")
     run([PY, "-m", "tools.tasks.k8s", "down"])
     return 0
 
 
 def cmd_clean(_args: argparse.Namespace) -> int:
+    """Remove generated data, caches and build output."""
     header("cleaning generated output")
     import shutil as _sh
 
@@ -322,6 +351,7 @@ def cmd_clean(_args: argparse.Namespace) -> int:
 
 
 def cmd_all(_args: argparse.Namespace) -> int:
+    """doctor -> up -> seed -> scrape -> quality."""
     for fn in (cmd_doctor, cmd_up, cmd_seed, cmd_scrape, cmd_quality):
         rc = fn(argparse.Namespace())
         if rc != 0:
@@ -341,6 +371,8 @@ COMMANDS = {
     "quality": cmd_quality,
     "test": cmd_test,
     "docs": cmd_docs,
+    "clickhouse-load": cmd_clickhouse_load,
+    "metabase-import": cmd_metabase_import,
     "lineage": cmd_lineage,
     "infra-plan": cmd_infra_plan,
     "infra-destroy": cmd_infra_destroy,
@@ -363,8 +395,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "help":
         print("\nSENTINEL tasks:\n")
         for name, fn in COMMANDS.items():
-            doc = (fn.__doc__ or "").strip().splitlines()[0]
-            print(f"  {name:16s} {doc}")
+            # Some commands have no docstring; help must still list them rather than crash.
+            doc_lines = (fn.__doc__ or "").strip().splitlines()
+            summary = doc_lines[0].strip() if doc_lines else ""
+            print(f"  {name:18s} {summary}")
         print()
         return 0
 

@@ -1,0 +1,53 @@
+[
+  {
+    "name": "Inventory by category",
+    "description": "Where the catalogue's value sits, by category.",
+    "cards": [
+      {
+        "name": "Inventory value by category",
+        "display": "bar",
+        "query": "SELECT coalesce(category_name, '(no category)') AS category_name, products, inventory_value FROM sentinel.v_inventory_by_category ORDER BY inventory_value DESC LIMIT 15",
+        "visualization_settings": { "graph.dimensions": ["category_name"], "graph.metrics": ["inventory_value"] }
+      },
+      {
+        "name": "Products per category",
+        "display": "table",
+        "query": "SELECT coalesce(category_name, '(no category)') AS category_name, products FROM sentinel.v_inventory_by_category ORDER BY products DESC LIMIT 20"
+      }
+    ]
+  },
+  {
+    "name": "Price and rating",
+    "description": "How the catalogue is priced, and whether rating correlates with price.",
+    "cards": [
+      {
+        "name": "Average price by rating",
+        "display": "bar",
+        "query": "SELECT toString(rating) AS rating, round(avg(price), 2) AS avg_price, count() AS products FROM sentinel.fct_books WHERE rating IS NOT NULL GROUP BY rating ORDER BY rating",
+        "visualization_settings": { "graph.dimensions": ["rating"], "graph.metrics": ["avg_price"] }
+      },
+      {
+        "name": "Stock status",
+        "display": "pie",
+        "query": "SELECT if(is_in_stock, 'in stock', 'out of stock') AS status, count() AS products FROM sentinel.fct_books GROUP BY status"
+      }
+    ]
+  },
+  {
+    "name": "Hockey season trends",
+    "description": "Goals per game and win rate across seasons.",
+    "cards": [
+      {
+        "name": "Average goals for by season",
+        "display": "line",
+        "query": "SELECT season_year, round(avg(goals_for), 2) AS avg_goals_for, round(avg(goals_against), 2) AS avg_goals_against FROM sentinel.fct_hockey_season GROUP BY season_year ORDER BY season_year",
+        "visualization_settings": { "graph.dimensions": ["season_year"], "graph.metrics": ["avg_goals_for", "avg_goals_against"] }
+      },
+      {
+        "name": "Best win rates",
+        "display": "table",
+        "query": "SELECT team_name, round(avg(win_rate_recomputed), 3) AS win_rate, count() AS seasons FROM sentinel.fct_hockey_season WHERE win_rate_recomputed IS NOT NULL GROUP BY team_name ORDER BY win_rate DESC LIMIT 15"
+      }
+    ]
+  }
+]
