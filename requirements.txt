@@ -17,6 +17,7 @@ duckdb==1.4.1
 pandas==2.3.3
 pyarrow==21.0.0
 pyiceberg==0.9.1
+sqlalchemy>=2.0  # pyiceberg's SqlCatalog backend (extra [sql-sqlite])
 
 # --- storage / databases ---
 boto3==1.40.45

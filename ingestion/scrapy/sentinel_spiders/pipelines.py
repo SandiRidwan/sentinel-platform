@@ -182,6 +182,7 @@ class ParquetSinkPipeline:
         self.bucket = bucket
         self.prefix = prefix
         self.buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.item_class_by_table: dict[str, str] = {}
         self.written_files: list[str] = []
         self.written_rows = 0
 
@@ -203,7 +204,9 @@ class ParquetSinkPipeline:
         record = dict(adapter)
         record.setdefault("scraped_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
         record["_spider"] = spider.name
-        table = _table_name(type(item).__name__)
+        item_class = type(item).__name__
+        table = _table_name(item_class)
+        self.item_class_by_table[table] = item_class
         self.buffers[table].append(record)
         if len(self.buffers[table]) >= self.FLUSH_EVERY:
             self._flush(table, spider)
@@ -218,7 +221,7 @@ class ParquetSinkPipeline:
             f"{self.prefix}{table}/dt={now:%Y-%m-%d}/hour={now:%H}/"
             f"{spider.name}-{now:%Y%m%dT%H%M%S}-{len(self.written_files):04d}.parquet"
         )
-        payload = _rows_to_parquet(rows)
+        payload = _rows_to_parquet(rows, self.item_class_by_table.get(table))
         uri = put_bytes(key, payload, bucket=self.bucket, content_type="application/octet-stream")
         self.written_files.append(uri)
         self.written_rows += len(rows)
@@ -275,12 +278,63 @@ def _coerce_number(value: Any) -> float | int | None:
     return None
 
 
-def _rows_to_parquet(rows: list[dict[str, Any]]) -> bytes:
-    """All-null-typed columns become strings so the schema does not explode."""
-    columns: dict[str, list[Any]] = defaultdict(list)
+# Explicit Parquet schemas, per item type.
+#
+# Inferring the schema per flush is how a lake rots: a run where a column happened to be
+# all-null writes it as string, the next run writes it as int64, and Spark then refuses to
+# read the table at all ("Parquet column cannot be converted ... [ot_losses]"). Declaring
+# the type once means every file is readable by every reader.
+PARQUET_SCHEMAS: dict[str, pa.Schema] = {
+    "BookItem": pa.schema([
+        ("source", pa.string()), ("url", pa.string()), ("title", pa.string()),
+        ("price", pa.float64()), ("currency", pa.string()), ("availability", pa.string()),
+        ("stock_count", pa.int64()), ("rating", pa.int64()), ("category", pa.string()),
+        ("upc", pa.string()), ("scraped_at", pa.string()), ("_spider", pa.string()),
+    ]),
+    "CategoryItem": pa.schema([
+        ("source", pa.string()), ("url", pa.string()), ("name", pa.string()),
+        ("slug", pa.string()), ("scraped_at", pa.string()), ("_spider", pa.string()),
+    ]),
+    "QuoteItem": pa.schema([
+        ("source", pa.string()), ("url", pa.string()), ("text", pa.string()),
+        ("author", pa.string()), ("author_url", pa.string()),
+        ("tags", pa.list_(pa.string())), ("scraped_at", pa.string()), ("_spider", pa.string()),
+    ]),
+    "CountryItem": pa.schema([
+        ("source", pa.string()), ("url", pa.string()), ("name", pa.string()),
+        ("capital", pa.string()), ("population", pa.int64()), ("area_km2", pa.float64()),
+        ("scraped_at", pa.string()), ("_spider", pa.string()),
+    ]),
+    "HockeyTeamItem": pa.schema([
+        ("source", pa.string()), ("url", pa.string()), ("year", pa.int64()),
+        ("team", pa.string()), ("wins", pa.int64()), ("losses", pa.int64()),
+        ("ot_losses", pa.int64()), ("win_pct", pa.float64()), ("goals_for", pa.int64()),
+        ("goals_against", pa.int64()), ("scraped_at", pa.string()), ("_spider", pa.string()),
+    ]),
+}
+
+
+def _rows_to_parquet(rows: list[dict[str, Any]], item_class_name: str | None = None) -> bytes:
+    """Write rows with a declared schema when one exists, inferring only as a fallback."""
+    schema = PARQUET_SCHEMAS.get(item_class_name or "")
+
+    if schema is not None:
+        columns: dict[str, list[Any]] = {name: [] for name in schema.names}
+        for row in rows:
+            for name in schema.names:
+                columns[name].append(_coerce_for_field(row.get(name), schema.field(name).type))
+        arrays = [pa.array(columns[name], type=schema.field(name).type) for name in schema.names]
+        table = pa.Table.from_arrays(arrays, schema=schema)
+        buffer = io.BytesIO()
+        pq.write_table(table, buffer, compression="zstd")
+        return buffer.getvalue()
+
+    # No declared schema: fall back to inference, still guarding against the
+    # all-null-becomes-string trap by widening to string only for that case.
+    columns = {}
     for row in rows:
         for key, value in row.items():
-            columns[key].append(value)
+            columns.setdefault(key, []).append(value)
 
     arrays: dict[str, pa.Array] = {}
     for name, values in columns.items():
@@ -296,3 +350,20 @@ def _rows_to_parquet(rows: list[dict[str, Any]]) -> bytes:
     buffer = io.BytesIO()
     pq.write_table(table, buffer, compression="zstd")
     return buffer.getvalue()
+
+
+def _coerce_for_field(value: Any, arrow_type: pa.DataType) -> Any:
+    """Fit a python value to the declared Arrow type, or None. Never guesses a wrong number."""
+    if value is None:
+        return None
+    if pa.types.is_integer(arrow_type):
+        number = _coerce_number(value)
+        return int(number) if number is not None else None
+    if pa.types.is_floating(arrow_type):
+        number = _coerce_number(value)
+        return float(number) if number is not None else None
+    if pa.types.is_list(arrow_type):
+        if isinstance(value, (list, tuple)):
+            return [str(v) for v in value]
+        return [str(value)] if value else []
+    return str(value)
