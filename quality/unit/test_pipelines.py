@@ -74,7 +74,7 @@ def test_pii_is_masked_by_default(monkeypatch):
     item = QuoteItem(
         source="quotes",
         url="u",
-        text="write to someone@example.com or +62 821-9414-9596",
+        text="write to someone@example.com or +62 812-0000-0000",
         author="A",
     )
     result = pipeline.process_item(item, FakeSpider())

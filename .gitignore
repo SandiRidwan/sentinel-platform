@@ -53,9 +53,18 @@ profiles.yml
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
 crash.log
+tfplan
+tfplan.*
+# dev.tfvars holds no credentials (enable_cloud_resources = false, empty project/account
+# fields), and CI needs it to run 	erraform plan -var-file=dev.tfvars. Real values live
+# in environment variables, so the file is tracked while every other tfvars stays ignored.
 *.tfvars
+!infra/terraform/dev.tfvars
+
+# --- stray local artefacts ---
+# A zero-byte DuckDB file left behind by a test run and a saved plan are not source.
+catalog_test.db
 
 # --- build / tooling ---
 node_modules/

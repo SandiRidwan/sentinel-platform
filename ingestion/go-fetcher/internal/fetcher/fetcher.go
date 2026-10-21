@@ -164,11 +164,6 @@ func dialerFor(cfg Config) func(ctx context.Context, network, addr string) (net.
 			return nil, err
 		}
 		return uconn, nil
-		if err := uconn.HandshakeContext(ctx); err != nil {
-			_ = raw.Close()
-			return nil, err
-		}
-		return uconn, nil
 	}
 }
 
