@@ -149,6 +149,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # The cloud dbt adapters live here. warehouse_parity parses the project under all
+          # three adapters, and without them Snowflake and BigQuery report parsed=False —
+          # which is a true statement about the environment and a false one about the code.
+          pip install -r requirements-extra.txt
 
       - name: Start the stack (object store, warehouse, Kafka, Debezium)
         run: |

@@ -316,6 +316,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if failures:
         for target, entry in report["targets"].items():
+            if not entry["parsed"]:
+                print(f"  -> {target}: the adapter is not available or the profile is invalid")
+                if entry.get("parse_tail"):
+                    for line in entry["parse_tail"].splitlines()[-3:]:
+                        print(f"     {line}")
+                if target != "dev":
+                    print("     hint: pip install -r requirements-extra.txt")
             for model, failure in entry.get("transpile_failures", {}).items():
                 print(f"  -> {target}.{model}: {failure['stage']}: {failure['error']}")
         return 1

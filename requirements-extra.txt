@@ -9,5 +9,5 @@ pyspark==3.5.7
 
 # dbt adapters for the cloud targets (M6). The local `dev` target uses dbt-duckdb
 # from requirements.txt, so the pipeline runs with neither of these installed.
-dbt-bigquery==1.9.1
+dbt-bigquery==1.9.2
 dbt-snowflake==1.9.4
