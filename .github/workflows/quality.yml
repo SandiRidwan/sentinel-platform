@@ -97,8 +97,26 @@ jobs:
           terraform plan -input=false -var-file=dev.tfvars -out=tfplan
           terraform show -no-color tfplan > plan.txt
         env:
-          # No credentials: the plan uses a local backend and placeholder values.
+          # No credentials: the root stack declares only the AWS provider, with the
+          # offline-plan flags in main.tf. Google and Snowflake live in their own stacks.
           TF_VAR_enable_cloud_resources: "false"
+
+      # The cloud stacks need real credentials for a plan, so CI validates their
+      # configuration only. That still catches a broken reference, a bad type or an
+      # unsupported argument before anyone spends money.
+      - name: validate the bigquery stack
+        working-directory: infra/terraform/bigquery
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: validate the snowflake stack
+        working-directory: infra/terraform/snowflake
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
 
       - uses: actions/upload-artifact@v4
         with:

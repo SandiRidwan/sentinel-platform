@@ -1,0 +1,43 @@
+# SENTINEL dbt profiles — three targets, one set of models.
+#
+#   dev        DuckDB over the local silver Parquet. No cloud account, no credentials.
+#   bigquery   managed warehouse, free tier is enough for a demo.
+#   snowflake  second target, proving the models are not written against one dialect.
+#
+# Point dbt at this file:  DBT_PROFILES_DIR=transform/dbt  (or make dbt-run)
+#
+# Credentials are read from the environment, never committed. .env.example lists them.
+
+sentinel:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../../data/warehouse/sentinel.duckdb') }}"
+      schema: gold
+      threads: 4
+      # DuckDB reads the silver Parquet directly; no load step is needed for dev.
+      extensions: []
+
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('GCP_PROJECT', '') }}"
+      dataset: "{{ env_var('BIGQUERY_DATASET', 'sentinel') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS', '') }}"
+      location: "{{ env_var('BIGQUERY_LOCATION', 'US') }}"
+      threads: 4
+      priority: interactive
+      timeout_seconds: 600
+
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD', '') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'SYSADMIN') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'SENTINEL') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'GOLD') }}"
+      threads: 4

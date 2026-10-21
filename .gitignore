@@ -47,7 +47,11 @@ data/warehouse/
 *.key
 credentials.json
 service-account*.json
+# dbt profiles. The broad rule exists because ~/.dbt/profiles.yml normally holds
+# credentials; this repository copy contains only env_var() references, and without
+# it a fresh clone and CI both fail with 'Could not find profile named sentinel'.
 profiles.yml
+!transform/dbt/profiles.yml
 
 # --- infra state ---
 *.tfstate

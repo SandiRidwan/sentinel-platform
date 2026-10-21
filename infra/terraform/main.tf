@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.60"
     }
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 6.0"
-    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
@@ -28,9 +24,6 @@ locals {
   # `terraform plan` with enable_cloud_resources=false exercises the configuration without
   # creating anything and without needing credentials.
   create = var.enable_cloud_resources ? 1 : 0
-
-  create_bigquery  = var.enable_cloud_resources && var.gcp_project != "" ? 1 : 0
-  create_snowflake = var.enable_cloud_resources && var.snowflake_account != "" ? 1 : 0
 
   buckets = {
     raw    = "${local.name}-raw"
@@ -65,19 +58,22 @@ provider "aws" {
   }
 }
 
-provider "google" {
-  project = var.gcp_project != "" ? var.gcp_project : "sentinel-unset"
-  region  = "US"
-}
-
-# No root `provider "snowflake"` block on purpose.
+# No root `provider "google"` block, and no BigQuery resources, on purpose.
 #
-# Terraform configures a declared provider even when every resource using it has count = 0,
-# and the Snowflake provider authenticates during configuration. With the block present,
-# `terraform plan` with enable_cloud_resources = false still tried to log in to
-# sentinel-unset.snowflakecomputing.com and failed. Leaving it out means the default plan
-# needs no Snowflake account; enabling the Snowflake target means adding this block with
-# real credentials, which is a deliberate act rather than an accident.
+# The Google provider resolves credentials during configuration, so declaring it here made
+# `terraform plan` reach for Application Default Credentials even with
+# enable_cloud_resources = false and every resource at count = 0. The plan therefore only
+# worked on a machine that had run `gcloud auth application-default login` — which is not
+# "no credentials needed", it is "credentials needed but already present".
+#
+# The BigQuery dataset and its policy tags now live in their own stack at
+# infra/terraform/bigquery, the same way Snowflake does. The root plan is a pure
+# configuration check: no provider in it authenticates.
+#
+# No root `provider "snowflake"` block either, for the identical reason. Terraform
+# configures a declared provider even when every resource using it has count = 0, and the
+# Snowflake provider authenticates during configuration; with the block present, the
+# default plan tried to log in to sentinel-unset.snowflakecomputing.com and failed.
 
 # ---------------------------------------------------------------- lake ----
 
@@ -93,16 +89,9 @@ module "lake" {
 }
 
 # ------------------------------------------------------------ warehouse ----
-
-module "warehouse" {
-  source = "./modules/warehouse"
-  count  = local.create_bigquery
-
-  project  = var.gcp_project
-  dataset  = "sentinel"
-  location = "US"
-  tags     = local.common_tags
-}
+#
+# The BigQuery dataset moved to infra/terraform/bigquery. See the note above about the
+# Google provider authenticating at configuration time.
 
 
 # ---------------------------------------------------------------- cost ----

@@ -2,21 +2,29 @@
 
 Terraform for the lake and the warehouses, Kubernetes manifests for the stack.
 
-## The two-stack split
+## The three-stack split
 
 | Stack | Path | What it owns |
 |---|---|---|
-| Platform | `infra/terraform/` | S3 zone buckets, lifecycle, BigQuery dataset + policy tags, budget |
+| Platform | `infra/terraform/` | S3 zone buckets, lifecycle, budget |
+| BigQuery | `infra/terraform/bigquery/` | The dataset and its policy tags |
 | Snowflake | `infra/terraform/snowflake/` | The second warehouse, with its own credentials |
 
-They are separate because they have different credentials and different lifecycles. Keeping
-Snowflake in the platform stack meant `terraform plan` authenticated to Snowflake even when
-nothing Snowflake-related was being created — which fails on any machine without an account.
+They are separate because they have different credentials and different lifecycles, and
+because **Terraform configures a declared provider even when every resource using it has
+`count = 0`**. Both the Google and Snowflake providers authenticate during configuration, so
+having either block in the platform stack made `terraform plan` reach for credentials even
+with `enable_cloud_resources = false`. The BigQuery stack was split out after CI caught
+exactly that: `Attempted to load application default credentials`.
+
+A provider block belongs in the stack that has the credentials for it. Anything else turns
+"the plan needs no credentials" into "the plan needs no credentials *on my machine*".
 
 ## Plan without credentials
 
-`enable_cloud_resources = false` (the default in `dev.tfvars`) makes the plan a pure
-configuration check: no resources, no credentials, no network.
+`enable_cloud_resources = false` (the default in `dev.tfvars`) makes the platform plan a pure
+configuration check: no resources, no credentials, no network, and no provider in the stack
+that authenticates.
 
 ```bash
 cd infra/terraform
@@ -38,6 +46,14 @@ Changes to Outputs:
 
 This is what CI runs. A pull request from a fork has no credentials and must still be able to
 prove the configuration is sound.
+
+The BigQuery and Snowflake stacks are validated with `terraform validate` only, because a
+plan there genuinely needs credentials:
+
+```bash
+cd infra/terraform/bigquery && terraform init -backend=false && terraform validate
+cd infra/terraform/snowflake && terraform init -backend=false && terraform validate
+```
 
 Three provider settings make that possible, and each one is there for a reason:
 

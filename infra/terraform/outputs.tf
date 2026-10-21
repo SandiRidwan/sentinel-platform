@@ -12,8 +12,8 @@ output "bucket_names" {
 }
 
 output "bigquery_dataset" {
-  description = "BigQuery dataset id, or null when not created."
-  value       = length(module.warehouse) > 0 ? module.warehouse[0].dataset_id : null
+  description = "BigQuery dataset id. Always null here: the dataset lives in the bigquery stack."
+  value       = null
 }
 
 
