@@ -1,0 +1,97 @@
+# SENTINEL alert rules.
+#
+# Every rule here answers "what would I want to know before a human notices?" The metric
+# names are the ones go-fetcher actually exposes — checked against a live /metrics response
+# rather than written from memory:
+#
+#   sentinel_go_fetcher_requests_total
+#   sentinel_go_fetcher_failures_total
+#   sentinel_go_fetcher_bytes_total
+#   sentinel_go_fetcher_max_concurrency
+#   sentinel_go_fetcher_rate_limit
+#
+# A rule referencing a metric that does not exist is silent, which is the worst property an
+# alert can have.
+
+groups:
+  - name: sentinel-ingestion
+    interval: 30s
+    rules:
+      - alert: FetcherDown
+        expr: up{job="go-fetcher"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: ingestion
+        annotations:
+          summary: "go-fetcher has been unreachable for 2 minutes"
+          description: >-
+            The fetcher is the path every backfill depends on. Check the pod, then check
+            whether the rate limiter or the target is the reason it stopped answering.
+          runbook: "docs/runbooks/fetcher-down.md"
+
+      - alert: FetcherHighFailureRate
+        expr: |
+          (
+            sum(rate(sentinel_go_fetcher_failures_total[5m]))
+            /
+            clamp_min(sum(rate(sentinel_go_fetcher_requests_total[5m])), 0.001)
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          component: ingestion
+        annotations:
+          summary: "More than 20% of fetches are failing"
+          description: >-
+            Sustained failure above 20% is either a block (the target started rejecting the
+            fingerprint) or a proxy problem. Distinguish before retrying harder: retrying a
+            blocked target makes the block worse.
+          runbook: "docs/runbooks/target-blocked.md"
+
+      - alert: FetcherSaturated
+        expr: |
+          sum(rate(sentinel_go_fetcher_requests_total[5m]))
+          >
+          max(sentinel_go_fetcher_max_concurrency) * 0.9
+        for: 15m
+        labels:
+          severity: info
+          component: ingestion
+        annotations:
+          summary: "Fetcher is at its concurrency ceiling"
+          description: >-
+            Throughput is limited by the configured ceiling rather than by the target. If
+            this is sustained and the target is healthy, raise MAX_CONCURRENCY; if the target
+            is not healthy, this alert is the symptom and the block alert is the cause.
+
+  - name: sentinel-pipeline
+    interval: 60s
+    rules:
+      # The pipeline writes one row per spider per run into governance.ingest_run. These are
+      # checked by the quality gate rather than by Prometheus, because Prometheus cannot see
+      # Postgres. The alert below fires on the proxy signal: no new bytes at all.
+      - alert: NoIngestionActivity
+        expr: increase(sentinel_go_fetcher_bytes_total[6h]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          component: ingestion
+        annotations:
+          summary: "No bytes fetched in 6 hours"
+          description: >-
+            Either nothing is scheduled or every scheduled run is failing before it fetches.
+            Check the Airflow DAG runs before checking the fetcher.
+          runbook: "docs/runbooks/dag-failure.md"
+
+      - alert: RateLimitMisconfigured
+        expr: sentinel_go_fetcher_rate_limit == 0
+        for: 30m
+        labels:
+          severity: info
+          component: ingestion
+        annotations:
+          summary: "Rate limiter is disabled"
+          description: >-
+            RATE_PER_SECOND=0 means no limiter. That is correct for a benchmark and wrong for
+            anything pointed at a real site. Confirm this is deliberate.

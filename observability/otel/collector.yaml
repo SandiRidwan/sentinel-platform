@@ -1,0 +1,65 @@
+# SENTINEL OpenTelemetry collector.
+#
+# Receives OTLP from the Python components (scrapy, the Airflow DAGs) and the Go fetcher,
+# and fans out to two places: traces stay local for debugging, metrics are exposed for
+# Prometheus to scrape. Keeping the collector in front means a component only has to know one
+# address, and the exporter can change without touching application code.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch before export: one export per request is how a trace backend gets overwhelmed by
+  # a crawler that is working correctly.
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+  # Drop attributes that are expensive and unhelpful at this scale.
+  attributes/scrub:
+    actions:
+      - key: http.user_agent
+        action: delete
+      - key: net.peer.name
+        action: delete
+
+  # A crawler produces a lot of spans. Keep the tail, drop the boring middle.
+  probabilistic_sampler:
+    sampling_percentage: 25
+
+exporters:
+  # Traces to a local file so they survive a restart and can be inspected without a backend.
+  file:
+    path: /var/log/otel/traces.jsonl
+    rotation:
+      max_megabytes: 50
+      max_backups: 3
+
+  # Metrics for Prometheus to scrape.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [probabilistic_sampler, attributes/scrub, batch]
+      exporters: [file]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+  telemetry:
+    logs:
+      level: info

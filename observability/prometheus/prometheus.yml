@@ -1,0 +1,37 @@
+# SENTINEL Prometheus scrape configuration.
+#
+# The go-fetcher exposes /metrics in the text exposition format (hand-rolled, no client
+# library). Everything else is scraped from the exporter side: Airflow has its own statsd
+# exporter, and the pipeline stages write counters to Postgres rather than to a metrics
+# endpoint, because a counter that only exists in memory is lost with the process.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: sentinel
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  - job_name: go-fetcher
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["go-fetcher:8088"]
+        labels:
+          component: ingestion
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Airflow's own metrics, if statsd_exporter is in the stack.
+  # - job_name: airflow
+  #   static_configs:
+  #     - targets: ["statsd-exporter:9102"]
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
