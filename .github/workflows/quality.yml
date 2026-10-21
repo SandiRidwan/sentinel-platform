@@ -196,6 +196,22 @@ jobs:
       - name: L4 expectation suites
         run: python -m quality.expectations.run_suites
 
+      # The control register evaluates evidence mechanically, so every report it cites has
+      # to exist before it runs. These four steps produce pii_scan.json,
+      # column_security.json, the lineage events and contracts.json. Without them the
+      # register correctly fails — which is what happened the first time this job ran.
+      - name: Spider contracts (evidence for the quality-gate control)
+        run: python -m quality.contract.run_contracts
+
+      - name: PII scan
+        run: python -m governance.pii.scan
+
+      - name: Apply column security
+        run: python -m governance.policies.apply
+
+      - name: Emit lineage
+        run: python -m tools.lineage
+
       # --- Everything that reads the warehouse ---
 
       - name: Warehouse parity (parse + transpile; executes on dev only)
