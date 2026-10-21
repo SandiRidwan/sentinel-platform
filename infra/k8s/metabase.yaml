@@ -1,0 +1,93 @@
+# Metabase — dashboards defined in analytics/metabase/dashboards and imported by
+# 'make metabase-import'. The container only serves them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metabase
+  namespace: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metabase
+  template:
+    metadata:
+      labels:
+        app: metabase
+    spec:
+      initContainers:
+        # Metabase stores its own application schema and needs its own database. In the
+        # compose stack tools/seed/sql creates it on first Postgres init; here nothing does,
+        # and Metabase crash-loops with a connection error that never says which database is
+        # missing. This makes the dependency explicit and idempotent.
+        - name: ensure-metabase-db
+          image: postgres:17.4-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -U "$POSTGRES_USER"; do sleep 2; done
+              exists=$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+                "SELECT 1 FROM pg_database WHERE datname='metabase'")
+              if [ "$exists" != "1" ]; then
+                psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE DATABASE metabase"
+              fi
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: sentinel-secrets, key: POSTGRES_USER }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: sentinel-secrets, key: POSTGRES_PASSWORD }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: sentinel-secrets, key: POSTGRES_PASSWORD }
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef: { name: sentinel-config, key: POSTGRES_DB }
+      containers:
+        - name: metabase
+          image: metabase/metabase:v0.55.5
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MB_DB_TYPE
+              value: postgres
+            - name: MB_DB_HOST
+              value: postgres
+            - name: MB_DB_PORT
+              value: "5432"
+            - name: MB_DB_DBNAME
+              value: metabase
+            - name: MB_DB_USER
+              valueFrom:
+                secretKeyRef: { name: sentinel-secrets, key: POSTGRES_USER }
+            - name: MB_DB_PASS
+              valueFrom:
+                secretKeyRef: { name: sentinel-secrets, key: POSTGRES_PASSWORD }
+            - name: MB_ANON_TRACKING_ENABLED
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 20
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metabase
+  namespace: sentinel
+spec:
+  selector:
+    app: metabase
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30300
+  type: NodePort

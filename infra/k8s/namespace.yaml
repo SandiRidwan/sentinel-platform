@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sentinel
+  labels:
+    app.kubernetes.io/part-of: sentinel
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel-config
+  namespace: sentinel
+data:
+  S3_ENDPOINT_URL: "http://s3:9090"
+  S3_BUCKET_RAW: "sentinel-raw"
+  S3_BUCKET_BRONZE: "sentinel-bronze"
+  S3_BUCKET_SILVER: "sentinel-silver"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "sentinel"
+  CLICKHOUSE_HOST: "clickhouse"
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DB: "sentinel"
+  GO_FETCHER_URL: "http://go-fetcher:8088"
+  FETCH_ALLOWED_HOSTS: "books.toscrape.com,quotes.toscrape.com,scrapethissite.com"
+  SENTINEL_LOG_JSON: "1"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sentinel-secrets
+  namespace: sentinel
+type: Opaque
+stringData:
+  # Local cluster only. A real cluster uses an external secret store; this file is the
+  # reason the README says so.
+  POSTGRES_USER: sentinel
+  POSTGRES_PASSWORD: change-me-postgres
+  CLICKHOUSE_PASSWORD: change-me-clickhouse

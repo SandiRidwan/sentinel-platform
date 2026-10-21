@@ -1,0 +1,78 @@
+# go-fetcher — the high-volume HTTP path.
+#
+# imagePullPolicy IfNotPresent with a local image loaded by 'kind load docker-image': the
+# cluster never needs registry credentials for a build that only exists on this machine.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-fetcher
+  namespace: sentinel
+  labels:
+    app: go-fetcher
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-fetcher
+  template:
+    metadata:
+      labels:
+        app: go-fetcher
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8088"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: go-fetcher
+          image: sentinel/go-fetcher:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8088
+              name: http
+          envFrom:
+            - configMapRef:
+                name: sentinel-config
+          env:
+            - name: PORT
+              value: "8088"
+            - name: FINGERPRINT_PROFILE
+              value: "chrome"
+            - name: RATE_PER_SECOND
+              value: "5"
+            - name: MAX_CONCURRENCY
+              value: "16"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8088
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8088
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-fetcher
+  namespace: sentinel
+spec:
+  selector:
+    app: go-fetcher
+  ports:
+    - port: 8088
+      targetPort: 8088
+      nodePort: 30080
+  type: NodePort

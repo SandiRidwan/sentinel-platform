@@ -1,0 +1,20 @@
+# kind cluster for SENTINEL.
+#
+# Ports are published on the node so the services are reachable from the host without a
+# port-forward per service, which is the difference between a demo someone can open and one
+# they have to run five commands to see.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: sentinel
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080   # go-fetcher
+        hostPort: 8088
+        protocol: TCP
+      - containerPort: 30812   # clickhouse http
+        hostPort: 8123
+        protocol: TCP
+      - containerPort: 30300   # metabase
+        hostPort: 3000
+        protocol: TCP
