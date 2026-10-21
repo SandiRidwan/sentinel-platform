@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 from tools.common.config import ROOT, get_settings
 

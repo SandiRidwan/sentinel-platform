@@ -12,9 +12,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
-import time
-from pathlib import Path
 
 from tools.common.config import ROOT
 

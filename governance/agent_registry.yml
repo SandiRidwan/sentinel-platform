@@ -1,0 +1,91 @@
+# SENTINEL — the tables an agent is allowed to read. THE SECOND GATE.
+#
+# governance/sources.yml decides which hosts may be crawled. This file decides which
+# tables an LLM-backed agent may query. They are the same idea at different layers: a
+# written-down allow-list that code enforces before the work happens, so "the agent
+# answered a question" cannot become "the agent read whatever it found".
+#
+# The agent never writes SQL. It selects a table, a metric, a column and filters from
+# this file, and the query is built from validated parts. That is why there is no SQL
+# injection surface to sanitise and no parser to outsmart.
+#
+# Reviewed: 2026-10-21
+
+version: 1
+reviewed_at: "2026-10-21"
+
+tables:
+  gold.dim_book:
+    description: One row per book in the catalogue, with its current price and stock.
+    columns:
+      book_key: string
+      upc: string
+      book_title: string
+      price: number
+      currency: string
+      is_in_stock: boolean
+      stock_count: integer
+      rating: integer
+      category_name: string
+
+  gold.dim_category:
+    description: The book categories the catalogue is organised into.
+    columns:
+      category_key: string
+      category_slug: string
+      category_name: string
+      category_url: string
+
+  gold.dim_country:
+    description: Countries with population, area and a derived density band.
+    columns:
+      country_key: string
+      country_name: string
+      capital_name: string
+      population: integer
+      area_km2: number
+      population_density: number
+      density_band: string
+
+  gold.fct_books:
+    description: Book facts with inventory value, one row per book.
+    columns:
+      book_key: string
+      category_key: string
+      upc: string
+      currency: string
+      price: number
+      stock_count: integer
+      rating: integer
+      is_in_stock: boolean
+      inventory_value: number
+      is_rated: integer
+
+  gold.fct_hockey_season:
+    description: One row per team per season with wins, losses and goals.
+    columns:
+      season_key: string
+      season_year: integer
+      team_name: string
+      wins: integer
+      losses: integer
+      ot_losses: integer
+      win_pct: number
+      goals_for: integer
+      goals_against: integer
+      goal_difference: integer
+      games_played: integer
+      win_rate_recomputed: number
+
+# Deliberately out of reach. The snapshot table holds every historical version of every
+# book; an agent answering "what is the price of X" from it would return N rows and look
+# correct. Naming it here is what makes the refusal a decision rather than an omission.
+denied:
+  - table: gold.dim_book_snapshot
+    reason: >-
+      Type-2 history. A question about "the price" has one answer; this table has one row
+      per version, so reading it would silently multiply results.
+  - table: silver.stg_books
+    reason: >-
+      Staging layer. Unvalidated, no contract, and it changes shape whenever the crawler
+      does. Agents read the gold layer only.

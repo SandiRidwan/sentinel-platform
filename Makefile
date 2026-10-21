@@ -7,7 +7,8 @@ RUN := $(PY) -m tools.tasks.runner
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor up down restart logs seed scrape quality test docs lineage \
-        clickhouse-load metabase-import infra-plan infra-destroy k8s-up k8s-down clean all
+        clickhouse-load metabase-import infra-plan infra-destroy k8s-up k8s-down clean all \
+        cdc agent-eval ask edge-test controls warehouse-parity bench verify
 
 help:            ## show this help
 	@$(RUN) help
@@ -68,3 +69,27 @@ clean:           ## remove generated data, caches and build output
 
 all:             ## doctor -> up -> seed -> scrape -> quality
 	$(RUN) all
+
+cdc:             ## CDC end to end: seed source, register connector, consume, prove parity
+	$(RUN) cdc
+
+agent-eval:      ## 20 questions that must be answered, 10 that must be refused
+	$(RUN) agent-eval
+
+ask:             ## ask the agent: make ask Q="how many books are out of stock?"
+	$(RUN) ask "$(Q)"
+
+edge-test:       ## type-check and test the edge worker (no Cloudflare account needed)
+	$(RUN) edge-test
+
+controls:        ## evaluate the control register into an evidence pack
+	$(RUN) controls
+
+warehouse-parity: ## parse, transpile and (with credentials) execute across targets
+	$(RUN) warehouse-parity
+
+bench:           ## capacity benchmark at 10M rows
+	$(RUN) bench
+
+verify:          ## check every claim the README makes, in one command
+	$(RUN) verify

@@ -93,7 +93,7 @@ def main() -> int:
         "java.base/sun.security.action",
         "java.base/sun.util.calendar",
     ):
-        builder = builder.config(f"spark.driver.extraJavaOptions", f"--add-opens={package}=ALL-UNNAMED")
+        builder = builder.config("spark.driver.extraJavaOptions", f"--add-opens={package}=ALL-UNNAMED")
 
     try:
         spark = builder.getOrCreate()

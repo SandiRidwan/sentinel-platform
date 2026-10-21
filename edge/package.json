@@ -1,0 +1,17 @@
+{
+  "name": "sentinel-edge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cache-aware edge facade for the SENTINEL warehouse API. Metadata cached 60s, inventory never cached.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9"
+  }
+}

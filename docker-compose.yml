@@ -129,6 +129,18 @@ services:
 
   postgres:
     image: postgres:17.4-alpine
+    # wal_level=logical is what makes CDC possible at all: the default `replica` level
+    # writes only enough WAL to replay whole pages, so logical decoding has nothing to
+    # read. Debezium reports this as "logical decoding requires wal_level >= logical".
+    # See docs/adr/0011-cdc-reads-the-write-ahead-log.md.
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sentinel}
       POSTGRES_USER: ${POSTGRES_USER:-sentinel}
@@ -146,6 +158,83 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    restart: unless-stopped
+
+  # --- CDC path -------------------------------------------------------------
+  # Kafka runs in KRaft mode: no ZooKeeper container, one less process to keep
+  # healthy on a laptop. The cluster id is fixed so a restarted volume does not
+  # refuse to rejoin its own metadata log.
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Two listeners, because the broker advertises a different address to each
+      # client and the client connects to whatever it is told. A single advertised
+      # address of kafka:9092 works inside compose and fails on the host with
+      # "Failed to resolve 'kafka:9092'" — the host resolves the name, not the port
+      # mapping. Publishing 9094 and advertising localhost:9094 for EXTERNAL is the
+      # fix, and it is a config change, not a second cluster.
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      # 512 MB is enough for a single-partition demo topic and leaves room for the
+      # rest of the stack on an 8 GB machine.
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "9094:9094"   # EXTERNAL listener, for the Python consumer on the host
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server 127.0.0.1:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  # Debezium reads the Postgres WAL and publishes row-level changes. Pinned to a
+  # specific release: connector behaviour and the JSON envelope shape differ between
+  # minor versions, and the consumer parses that envelope.
+  connect:
+    image: debezium/connect:2.7.3.Final
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: sentinel-connect
+      CONFIG_STORAGE_TOPIC: sentinel_connect_configs
+      OFFSET_STORAGE_TOPIC: sentinel_connect_offsets
+      STATUS_STORAGE_TOPIC: sentinel_connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # Schemas are disabled on purpose: the envelope is then plain JSON, which the
+      # consumer can read without a schema registry. A registry is the right answer
+      # for many producers; for one producer it is another service to run.
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "8083:8083"   # Connect REST API (connector registration)
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8083/connectors >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
   clickhouse:

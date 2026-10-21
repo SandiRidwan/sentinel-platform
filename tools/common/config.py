@@ -104,12 +104,27 @@ class GovernanceSettings:
 
 
 @dataclass(frozen=True)
+class KafkaSettings:
+    """CDC transport.
+
+    `bootstrap` is what the *host* uses. Inside compose the broker advertises
+    `kafka:9092`, so a container gets a different address for the same cluster; that is
+    a property of the advertised listener, not a second cluster.
+    """
+
+    bootstrap: str
+    connect_url: str
+    topic: str
+
+
+@dataclass(frozen=True)
 class Settings:
     root: Path
     env: str
     s3: S3Settings
     pg: PostgresSettings
     ch: ClickHouseSettings
+    kafka: KafkaSettings
     scrape: ScrapeSettings
     governance: GovernanceSettings
     dbt_target: str
@@ -153,6 +168,11 @@ def get_settings() -> Settings:
             db=os.environ.get("CLICKHOUSE_DB", "sentinel"),
             user=os.environ.get("CLICKHOUSE_USER", "default"),
             password=os.environ.get("CLICKHOUSE_PASSWORD", "change-me-clickhouse"),
+        ),
+        kafka=KafkaSettings(
+            bootstrap=os.environ.get("KAFKA_BOOTSTRAP", "localhost:9094"),
+            connect_url=os.environ.get("KAFKA_CONNECT_URL", "http://localhost:8083"),
+            topic=os.environ.get("KAFKA_CDC_TOPIC", "sentinel.ops.product_price"),
         ),
         scrape=ScrapeSettings(
             user_agent=os.environ.get(

@@ -25,6 +25,14 @@ airflow.cfg
 airflow.db
 webserver_config.py
 
+# --- Iceberg catalog + bench output ---
+# The catalog is a SQLite file inside data/iceberg; *.parquet above covers the data files
+# but not the catalog itself, and a committed catalog would point at paths that do not
+# exist on anyone else's machine.
+data/iceberg/
+data/staging/zones/silver/books_bench/
+edge/node_modules/
+
 # --- Spark / Iceberg / warehouse ---
 spark-warehouse/
 metastore_db/
@@ -59,6 +67,8 @@ Thumbs.db
 
 # --- reports (generated, tracked selectively) ---
 quality/reports/*.json
+quality/reports/*.csv
+quality/reports/*.jsonl
 !quality/reports/.gitkeep
 governance/lineage/events/*.jsonl
 !governance/lineage/events/.gitkeep

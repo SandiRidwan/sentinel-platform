@@ -365,6 +365,110 @@ def cmd_clean(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _rc(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> int:
+    """Run a command and return its exit code.
+
+    `run()` returns a CompletedProcess and raises when check=True, so comparing its result
+    to 0 silently treats every success as a failure. This wrapper is the one place that
+    converts the two conventions.
+    """
+    return run(cmd, cwd=cwd, check=False, env=env).returncode
+
+
+def cmd_cdc(_args: argparse.Namespace) -> int:
+    """CDC end to end: seed source -> register connector -> consume -> prove parity."""
+    header("cdc (seed, register, consume, parity)")
+    steps = [
+        [PY, "-m", "cdc.seed", "--mutate"],
+        [PY, "-m", "cdc.register"],
+        [PY, "-m", "cdc.consumer", "--timeout", "90"],
+        [PY, "-m", "cdc.parity"],
+    ]
+    for step in steps:
+        if _rc(step) != 0:
+            fail(f"cdc stopped at: {' '.join(step[2:])}")
+            return 1
+    ok("cdc parity PASS")
+    return 0
+
+
+def cmd_agent_eval(_args: argparse.Namespace) -> int:
+    """20 questions that must be answered, 10 that must be refused."""
+    header("agent eval")
+    return _rc([PY, "-m", "agents.eval"])
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Ask the warehouse agent a question."""
+    question = " ".join(args.rest) if getattr(args, "rest", None) else ""
+    if not question:
+        warn('usage: sentinel ask "how many books are out of stock?"')
+        return 2
+    header(f"ask: {question}")
+    return _rc([PY, "-m", "agents.ask", question])
+
+
+def cmd_edge_test(_args: argparse.Namespace) -> int:
+    """Type-check and test the edge worker (no Cloudflare account needed)."""
+    header("edge worker")
+    edge = ROOT / "edge"
+    if not (edge / "node_modules").exists():
+        warn("edge/node_modules missing — run: cd edge && npm install")
+        return 1
+    # On Windows npm is `npm.cmd`, and CreateProcess does not apply PATHEXT: a bare
+    # "npm" raises FileNotFoundError even though it is on PATH. shutil.which resolves
+    # the real entrypoint, which is also the reason not to wrap this in `cmd /c`.
+    npm = shutil.which("npm")
+    if not npm:
+        warn("npm not found on PATH")
+        return 1
+    if _rc([npm, "run", "typecheck"], cwd=edge) != 0:
+        return 1
+    return _rc([npm, "test"], cwd=edge)
+
+
+def cmd_controls(_args: argparse.Namespace) -> int:
+    """Evaluate the control register into an evidence pack."""
+    header("control register")
+    return _rc([PY, "-m", "governance.report"])
+
+
+def cmd_warehouse_parity(_args: argparse.Namespace) -> int:
+    """Parse, transpile and (with credentials) execute across warehouse targets."""
+    header("warehouse parity")
+    return _rc([PY, "-m", "transform.warehouse_parity"])
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    """Capacity benchmark. Defaults to the full 10M rows."""
+    header("bench")
+    extra = list(getattr(args, "rest", []) or [])
+    return _rc([PY, "-m", "bench.run", *extra])
+
+
+def cmd_verify(_args: argparse.Namespace) -> int:
+    """Every claim the README makes, checked in one command."""
+    header("verify all claims")
+    steps = [
+        ([PY, "-m", "pytest", "-q", "-p", "no:warnings"], ROOT),
+        ([PY, "-m", "agents.eval"], ROOT),
+        ([PY, "-m", "governance.report"], ROOT),
+        ([PY, "-m", "transform.warehouse_parity"], ROOT),
+        ([PY, "-m", "cdc.parity"], ROOT),
+    ]
+    failures = 0
+    for step, cwd in steps:
+        label = " ".join(step[2:])
+        if _rc(step, cwd=cwd) != 0:
+            warn(f"FAILED: {label}")
+            failures += 1
+    if failures:
+        fail(f"{failures} verification step(s) failed")
+        return 1
+    ok("all verification steps passed")
+    return 0
+
+
 def cmd_all(_args: argparse.Namespace) -> int:
     """doctor -> up -> seed -> scrape -> quality."""
     for fn in (cmd_doctor, cmd_up, cmd_seed, cmd_scrape, cmd_quality):
@@ -391,6 +495,14 @@ COMMANDS = {
     "pii-scan": cmd_pii_scan,
     "policy-apply": cmd_policy_apply,
     "lineage": cmd_lineage,
+    "cdc": cmd_cdc,
+    "agent-eval": cmd_agent_eval,
+    "ask": cmd_ask,
+    "edge-test": cmd_edge_test,
+    "controls": cmd_controls,
+    "warehouse-parity": cmd_warehouse_parity,
+    "bench": cmd_bench,
+    "verify": cmd_verify,
     "infra-plan": cmd_infra_plan,
     "infra-destroy": cmd_infra_destroy,
     "k8s-up": cmd_k8s_up,

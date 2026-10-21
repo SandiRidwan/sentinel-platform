@@ -10,7 +10,6 @@ template labels, a container without a readiness probe, a Service pointing at no
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import yaml

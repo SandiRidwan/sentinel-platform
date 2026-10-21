@@ -95,6 +95,38 @@ make quality                                 # 4/4 levels pass
 | Lineage edges | **14** | `make lineage` |
 | Terraform plan | exit **0** · 0 resources · no credentials | `terraform plan` |
 
+### Extensions: streaming, agent, edge, controls
+
+Measured on one machine (Windows, 8-core, 15.8 GB RAM), from
+`quality/reports/bench_10m.json` and `quality/reports/cdc_parity.json`. Every number below
+is produced by a command in the table, not typed by hand.
+
+| Stage | Rows | Result | Command |
+|---|---:|---|---|
+| CDC parity | 122 | **122 verified · 0 missing · 0 mismatched · negative control PASS** | `make cdc` |
+| CDC events folded | 638 | 120 snapshots + 250 creates + 20 updates + 248 deletes | `python -m cdc.consumer` |
+| Agent eval | 30 | **20/20 answered · 10/10 refused** | `make agent-eval` |
+| Control register | 12 | **10/10 implemented controls have passing evidence · 1 partial · 1 gap** | `make controls` |
+| Edge worker | — | **12 tests · typecheck clean · no Cloudflare account** | `make edge-test` |
+| Warehouse portability | 10 models | parsed on 3 adapters · transpiled to 2 dialects · executed on 1 | `make warehouse-parity` |
+| Bench — generate | 10,000,000 | **26.7 s · 374,598 rows/s · 173 MB Parquet** | `make bench` |
+| Bench — dbt build | 10,000,000 | **20.8 s · 481,645 rows/s** | `make bench` |
+| Bench — dashboard query | 10,000,000 | **p50 33.6 ms · p95 37.5 ms · cold 70.5 ms** (20 runs) | `make bench` |
+| Bench — Iceberg append | 1,000,000 | **327,303 rows/s** · 10 data files | `make bench` |
+
+Two of those rows are deliberately unflattering, because they are the ones a reviewer would
+otherwise have to discover:
+
+- **Warehouse portability is not "runs on Snowflake and BigQuery".** The models parse under
+  all three adapters and transpile to both cloud dialects, and `executed_on: ["dev"]` says
+  plainly that only DuckDB was actually built. `--with-cloud` runs the real thing when
+  credentials exist.
+- **The Iceberg rewrite does not reclaim space.** pyiceberg 0.9 has no
+  `rewrite_data_files` and no `expire_snapshots`, so an `overwrite` adds a snapshot and
+  keeps the old files: 9.17 MB → 14.20 MB. The report carries `space_reclaimed: false`
+  rather than calling it compaction (ADR 0014).
+
+
 Per-table silver rows:
 
 | Table | Rows | Dedup key | Dropped |
@@ -323,6 +355,25 @@ uniqueness, column types, volume, and a suite that fails when it verifies nothin
 
 ---
 
+## ♻️ Using this for your own data
+
+Four parts of this repository are general and were written to be lifted. Each one runs
+without a cloud account, and each one has a section in **[docs/REUSING.md](docs/REUSING.md)**
+that says what to change and what it deliberately does not do.
+
+| Part | Copy it when you need | Change only |
+|---|---|---|
+| `agents/` + `governance/agent_registry.yml` | an LLM agent over your warehouse that cannot read what you did not allow | the registry, the word hints, the eval cases |
+| `cdc/parity.py` | proof that a streaming copy matches the batch copy | two read functions, the compared columns |
+| `governance/controls.yml` + `report.py` | an evidence pack a reviewer can check mechanically | the YAML |
+| `edge/` | a cache policy that can never serve a stale price | the metadata route list, the token |
+
+The rule that generalises beyond this repo: **an allow-list that is enforced before the work
+happens is a control; one that is checked afterwards is a comment.** The source register,
+the agent registry and the control register are the same idea at three layers.
+
+---
+
 ## 📁 Structure
 
 ```
@@ -339,9 +390,16 @@ sentinel-platform/
 │   └── metabase/               3 dashboards as JSON · idempotent importer
 ├── governance/
 │   ├── sources.yml             the gate
+│   ├── agent_registry.yml      the second gate: what an agent may read
+│   ├── controls.yml            the third gate: claims and their evidence
+│   ├── report.py               evaluates the register into JSON + CSV
 │   ├── pii/                    independent scan of what landed
 │   ├── policies/               column security · 9 entries · consumer views
 │   └── lineage/                OpenLineage events · Mermaid graph
+├── cdc/                        Debezium → Kafka → Iceberg · batch/stream parity
+├── agents/                     plan → act → verify · registry-bounded tools · 30-case eval
+├── edge/                       TypeScript worker · metadata cached, inventory never
+├── bench/                      10M-row generator and four-layer measurement
 ├── quality/
 │   ├── unit/  contract/  warehouse/  expectations/     four levels
 │   └── reports/                generated, gitignored
@@ -409,6 +467,23 @@ curl localhost:8088/healthz
 make k8s-down
 ```
 
+The extensions, each a single command:
+
+```bash
+make cdc             # seed source → register Debezium → consume → prove parity
+make agent-eval      # 20 questions answered, 10 refused
+make ask Q="how many books are out of stock?"
+make edge-test       # typecheck + 12 tests, no Cloudflare account
+make controls        # control register → JSON + CSV evidence pack
+make warehouse-parity # parse on 3 adapters, transpile to 2 dialects
+make bench           # 10M rows: generate, dbt build, p50/p95, Iceberg append
+make verify          # every claim above, checked in one command
+```
+
+`make verify` is the one to run if you only run one. It executes the unit tests, the agent
+eval, the control register, the portability check and the CDC parity comparison, and exits
+non-zero if any of them stops being true.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -432,7 +507,19 @@ make k8s-down
 ## ⚠️ Limitations (honest)
 
 - **Scale is local.** Hundreds of thousands of rows, hundreds of requests per minute. The
-  warehouse work is real; the volume is not enterprise.
+  warehouse work is real; the volume is not enterprise. The benchmark reaches ten million
+  rows on one machine, single-process, and says nothing about throughput under concurrency.
+- **The CDC consumer keeps the whole topic in memory.** Correct at 638 events; a streaming
+  fold with a state store would be needed at millions.
+- **The CDC Iceberg rewrite does not reclaim disk.** pyiceberg 0.9 has no
+  `rewrite_data_files` or `expire_snapshots`; the benchmark reports `space_reclaimed: false`
+  instead of calling it compaction.
+- **Snowflake and BigQuery were parsed and transpiled, not built.** `executed_on: ["dev"]`
+  in `quality/reports/warehouse_parity.json` is the honest scope.
+- **The agent does not join across tables.** A question that needs two tables is refused.
+  Adding joins means declaring relationships in the registry, which is a design task.
+- **Encryption at rest and secret scanning are declared gaps** in the control register
+  (C-11, C-12), with remediation notes rather than a claim.
 - **s3mock is a test double.** MinIO withdrew its public images in 2026. The application only
   knows `S3_ENDPOINT_URL`, so production is a config change — but s3mock is not a system of
   record.

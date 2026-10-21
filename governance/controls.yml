@@ -1,0 +1,248 @@
+# SENTINEL — control register. THE THIRD GATE, and the one a reviewer reads.
+#
+# sources.yml says what may be crawled. agent_registry.yml says what may be read.
+# This file says what the platform claims to do about data protection, and — for each
+# claim — which file proves it. A control with no evidence is not a control; it is a
+# sentence.
+#
+# `governance/report.py` evaluates every evidence entry mechanically and writes
+# quality/reports/controls-report.json + .csv. Nothing here is asserted by hand at
+# report time.
+#
+# Evidence types:
+#   file           the path exists (optionally with min_bytes)
+#   json_field     read a JSON file, walk a dotted path, compare
+#   text_contains  a file matches a regular expression
+#   jsonl_min_rows a JSON Lines file has at least N rows
+#
+# `status` is the honest current state: implemented | partial | gap. A gap is listed
+# with an owner and a reason rather than omitted, because a register that only contains
+# successes tells a reviewer nothing they can use.
+#
+# Reviewed: 2026-10-21
+
+version: 1
+reviewed_at: "2026-10-21"
+
+controls:
+  - id: C-01
+    name: Source allow-list is enforced before any request
+    status: implemented
+    frameworks: ["ISO 27001 A.8.1", "internal: data acquisition policy"]
+    description: >-
+      Ingestion refuses to crawl a host that is not declared with approved=true. The
+      check runs before the request is made, not after the response is parsed.
+    evidence:
+      - type: file
+        path: governance/sources.yml
+      - type: text_contains
+        path: governance/sources.yml
+        pattern: "approved: true"
+      - type: text_contains
+        path: tools/common/sources.py
+        pattern: "approved"
+      - type: file
+        path: quality/unit/test_source_gate.py
+
+  - id: C-02
+    name: Rejected sources are recorded with a reason
+    status: implemented
+    frameworks: ["ISO 27001 A.5.34", "GDPR Art. 6(1)(f) legitimate interest assessment"]
+    description: >-
+      Sources that were considered and refused stay in the register with the reason, so
+      the decision is not silently revisited later.
+    evidence:
+      - type: text_contains
+        path: governance/sources.yml
+        pattern: "^rejected:"
+      - type: text_contains
+        path: governance/sources.yml
+        pattern: "robots.txt"
+
+  - id: C-03
+    name: Personal data is detected and masked
+    status: implemented
+    frameworks: ["GDPR Art. 5(1)(c) minimisation", "ISO 27701 A.7.2"]
+    description: >-
+      A scan classifies columns as PII and the masking policy is applied to them.
+    evidence:
+      - type: file
+        path: quality/reports/pii_scan.json
+      # total_detections counts PII patterns found in the scanned columns. Zero means the
+      # scan ran and found nothing; it does not mean the scan was skipped, because the
+      # findings list records every column that was examined.
+      - type: json_field
+        path: quality/reports/pii_scan.json
+        field: total_detections
+        equals: 0
+
+  - id: C-04
+    name: Column-level access control is declared and applied
+    status: implemented
+    frameworks: ["ISO 27001 A.8.3", "SOC 2 CC6.1"]
+    description: >-
+      Restricted columns are declared in a policy file and enforced by the policy
+      application step, with a report that records what was applied.
+    evidence:
+      - type: file
+        path: governance/policies/column_security.yml
+      - type: file
+        path: quality/reports/column_security.json
+      # `missing` lists restricted columns that had no masking view created. An empty
+      # list is the pass condition, and it is the field the policy step actually writes.
+      - type: json_field
+        path: quality/reports/column_security.json
+        field: missing
+        equals: []
+
+  - id: C-05
+    name: Retention limits are configured for raw and gold data
+    status: implemented
+    frameworks: ["GDPR Art. 5(1)(e) storage limitation"]
+    description: >-
+      Raw and gold zones have separate retention windows, set in configuration rather
+      than hard-coded, so a policy change is a config change with an audit trail.
+    evidence:
+      - type: text_contains
+        path: .env.example
+        pattern: "RETENTION_DAYS_RAW="
+      - type: text_contains
+        path: .env.example
+        pattern: "RETENTION_DAYS_GOLD="
+      - type: text_contains
+        path: tools/common/config.py
+        pattern: "retention_days_raw"
+
+  - id: C-06
+    name: Data lineage is emitted for every stage
+    status: implemented
+    frameworks: ["ISO 27001 A.8.9", "internal: provenance requirement"]
+    description: >-
+      Each stage emits OpenLineage-style events and the graph is renderable, so a value
+      in gold can be traced back to the file it came from.
+    evidence:
+      - type: jsonl_min_rows
+        path: governance/lineage/events/events.jsonl
+        min_rows: 5
+      - type: file
+        path: governance/lineage/lineage.mmd
+
+  - id: C-07
+    name: The quality gate fails the pipeline instead of warning
+    status: implemented
+    frameworks: ["ISO 27001 A.8.16", "internal: data quality"]
+    description: >-
+      Four quality levels run in CI, and the command exits non-zero when any level fails.
+      A suite that verifies nothing also fails, so "0 checks passed" cannot read as a pass.
+    evidence:
+      - type: file
+        path: quality/reports/expectations.json
+      - type: json_field
+        path: quality/reports/expectations.json
+        field: failed
+        equals: []
+      - type: json_field
+        path: quality/reports/contracts.json
+        field: failed
+        equals: []
+      - type: json_field
+        path: quality/reports/contracts.json
+        field: passed
+        equals: 5
+      - type: text_contains
+        path: quality/expectations/run_suites.py
+        pattern: "verified"
+      - type: text_contains
+        path: .github/workflows/quality.yml
+        pattern: "quality"
+
+  - id: C-08
+    name: Every ingestion run is auditable per unit of work
+    status: implemented
+    frameworks: ["SOC 2 CC7.2", "internal: run audit"]
+    description: >-
+      The audit table is keyed by (run_id, spider). A run_id-only key silently discards
+      every spider after the first, which would make the audit trail look complete while
+      losing rows.
+    evidence:
+      - type: text_contains
+        path: tools/seed/sql/01-databases.sql
+        pattern: "PRIMARY KEY \\(run_id, spider\\)"
+      - type: text_contains
+        path: tools/seed/sql/01-databases.sql
+        pattern: "governance.ingest_run"
+
+  - id: C-09
+    name: Agent access to data is bounded by a written allow-list
+    status: implemented
+    frameworks: ["ISO 27001 A.9.4", "OWASP LLM Top 10 LLM06 excessive agency"]
+    description: >-
+      The agent never writes SQL. It selects a registered table and declared columns,
+      and both denials and unknown tables raise before any query is built.
+    evidence:
+      - type: file
+        path: governance/agent_registry.yml
+      - type: text_contains
+        path: governance/agent_registry.yml
+        pattern: "^denied:"
+      - type: file
+        path: quality/reports/agent_eval.json
+      - type: json_field
+        path: quality/reports/agent_eval.json
+        field: result
+        equals: PASS
+      - type: json_field
+        path: quality/reports/agent_eval.json
+        field: refusals_correct
+        equals: 10
+
+  - id: C-10
+    name: The streaming copy of a table provably matches the batch copy
+    status: implemented
+    frameworks: ["SOC 2 CC7.2", "internal: data integrity"]
+    description: >-
+      Two independent paths describe the same table, and a comparator with a negative
+      control proves they agree. A comparator that cannot fail is not evidence.
+    evidence:
+      - type: file
+        path: quality/reports/cdc_parity.json
+      - type: json_field
+        path: quality/reports/cdc_parity.json
+        field: result
+        equals: PASS
+      - type: json_field
+        path: quality/reports/cdc_parity.json
+        field: negative_control.passed
+        equals: true
+
+  - id: C-11
+    name: Encryption at rest for the warehouse and object store
+    status: gap
+    owner: platform
+    frameworks: ["ISO 27001 A.8.24", "GDPR Art. 32(1)(a)"]
+    description: >-
+      Not implemented locally: the demo writes to a filesystem warehouse and an S3 mock
+      with no KMS. Claiming this would be false.
+    remediation: >-
+      In a real deployment this is S3 SSE-KMS on the raw/bronze/silver buckets plus
+      storage-level encryption on the warehouse. Both are configuration, but neither is
+      exercised by this repository, so the control stays a gap until it is.
+    evidence: []
+
+  - id: C-12
+    name: Secrets never enter the repository or the image
+    status: partial
+    owner: platform
+    frameworks: ["ISO 27001 A.8.24", "internal: secret hygiene"]
+    description: >-
+      Credentials are read from the environment and .env is ignored, but there is no
+      automated secret scanner in CI, so this is a convention rather than a control.
+    remediation: >-
+      Add a pre-commit and CI secret scan (gitleaks or equivalent) over the full history,
+      then move this control to implemented with the scan report as evidence.
+    evidence:
+      - type: text_contains
+        path: .gitignore
+        pattern: "^\\.env$"
+      - type: file
+        path: .env.example

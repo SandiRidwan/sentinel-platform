@@ -17,7 +17,6 @@ import argparse
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from tools.common.config import ROOT, get_settings
 from tools.common.logging_setup import get_logger, setup_logging

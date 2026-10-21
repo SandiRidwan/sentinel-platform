@@ -29,6 +29,17 @@ great_expectations==0.18.22
 pytest==8.4.2
 pytest-cov==7.0.0
 
+# --- change data capture ---
+# confluent-kafka ships the librdkafka bindings; the pure-Python kafka clients are
+# slower and have weaker offset/watermark control, which is what the parity check needs.
+confluent-kafka==2.12.0
+
+# --- agent ---
+# LangGraph for the explicit plan/act/verify control flow, sqlglot for the dialect
+# transpile check in transform/warehouse_parity.py.
+langgraph==0.6.11
+sqlglot==30.24.0
+
 # --- service / api ---
 fastapi==0.119.0
 uvicorn==0.37.0
