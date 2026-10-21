@@ -17,7 +17,7 @@ final as (
         goals_for,
         goals_against,
         goal_difference,
-        wins + losses + ot_losses                          as games_played,
+        cast(wins + losses + ot_losses as bigint)          as games_played,
         case
             when (wins + losses + ot_losses) > 0
                 then cast(wins as double) / cast(wins + losses + ot_losses as double)

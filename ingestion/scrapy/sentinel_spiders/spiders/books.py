@@ -52,7 +52,7 @@ class BooksSpider(scrapy.Spider):
         if next_page:
             yield response.follow(next_page, callback=self.parse)
 
-    def parse_book(self, response, rating_word: str | None, category: str | None):
+    def parse_book(self, response, rating_word: str | None = None, category: str | None = None):
         """Extract one product detail page.
 
         @url https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html
