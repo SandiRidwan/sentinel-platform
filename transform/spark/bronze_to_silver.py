@@ -176,6 +176,19 @@ def _conform(df, schema: dict[str, str]):
             selectors.append(F.lit(None).cast(type_map[kind]).alias(column))
         else:
             selectors.append(F.col(column).cast(type_map[kind]).alias(column))
+
+    # Lineage column, added by both engines. The Spark and pandas paths must produce the
+    # same columns: they write into the same directory, and a reader takes the schema from
+    # whichever file it opens first. A mismatch there is a runtime Binder Error in dbt,
+    # not a warning.
+    #
+    # It has to be part of the select list, not a withColumn afterwards: select() drops the
+    # column, and a withColumn then references a column that no longer exists.
+    if "_ingested_from" in df.columns:
+        selectors.append(F.col("_ingested_from").cast(T.StringType()))
+    else:
+        selectors.append(F.lit(None).cast(T.StringType()).alias("_ingested_from"))
+
     return df.select(*selectors)
 
 

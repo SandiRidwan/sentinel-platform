@@ -1,0 +1,85 @@
+version: 2
+
+models:
+  - name: dim_category
+    description: "One row per catalogue category. Keyed on slug so a rename does not orphan products."
+    columns:
+      - name: category_key
+        description: "Surrogate key over category_slug."
+        data_tests: [unique, not_null]
+      - name: category_slug
+        data_tests: [unique, not_null]
+      - name: category_name
+        data_tests: [not_null]
+
+  - name: dim_book
+    description: "One row per product, joined to its category. Left join: a missing category must not drop a product."
+    columns:
+      - name: book_key
+        data_tests: [unique, not_null]
+      - name: upc
+        data_tests: [unique, not_null]
+      - name: book_title
+        data_tests: [not_null]
+      - name: currency
+        data_tests:
+          - accepted_values:
+              values: ["GBP", "USD", "EUR"]
+              # A new currency is a real possibility, not a bug; warn rather than block.
+              config:
+                severity: warn
+      - name: category_key
+        data_tests:
+          - relationships:
+              to: ref('dim_category')
+              field: category_key
+              config:
+                severity: warn  # an unmatched category is a data-quality signal, not a break
+      - name: rating
+        data_tests:
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+              config:
+                severity: warn
+      - name: price
+        data_tests:
+          - not_negative
+
+  - name: fct_books
+    description: "One row per product with derived measures. Inventory value is defined once, here."
+    columns:
+      - name: book_key
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('dim_book')
+              field: book_key
+      - name: inventory_value
+        data_tests: [not_null, not_negative]
+      - name: stock_count
+        data_tests: [not_negative]
+
+  - name: dim_country
+    description: "Countries with density and a band for grouping."
+    columns:
+      - name: country_key
+        data_tests: [unique, not_null]
+      - name: country_name
+        data_tests: [unique, not_null]
+      - name: density_band
+        data_tests:
+          - accepted_values:
+              values: ["unknown", "low", "medium", "high", "very_high"]
+
+  - name: fct_hockey_season
+    description: "One row per team per season with rate measures."
+    columns:
+      - name: season_key
+        data_tests: [unique, not_null]
+      - name: games_played
+        data_tests: [not_negative]
+      - name: win_rate_recomputed
+        data_tests: [not_negative]
+      - name: season_year
+        data_tests: [not_null]

@@ -1,0 +1,36 @@
+name: sentinel
+version: "1.0.0"
+config-version: 2
+
+profile: sentinel
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages", "logs"]
+
+require-dbt-version: [">=1.8.0", "<2.0.0"]
+
+vars:
+  # Root of the local staging tree written by transform/spark. Overridden per environment.
+  silver_root: "../../data/staging/zones/silver"
+  # Warehouse target the gold layer is written to: dev | bigquery | snowflake.
+  gold_database: sentinel
+
+models:
+  sentinel:
+    +materialized: view
+    staging:
+      +materialized: view
+      +schema: silver
+    marts:
+      +materialized: table
+      +schema: gold
+
+snapshots:
+  sentinel:
+    +target_schema: gold
+    +strategy: check
