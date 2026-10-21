@@ -295,6 +295,21 @@ def cmd_metabase_import(_args: argparse.Namespace) -> int:
     return 0
 
 
+
+def cmd_pii_scan(_args: argparse.Namespace) -> int:
+    """Scan the warehouse for PII and report what it finds."""
+    header("pii scan")
+    run([PY, "-m", "governance.pii.scan"])
+    return 0
+
+
+def cmd_policy_apply(_args: argparse.Namespace) -> int:
+    """Validate and apply the column-security policy."""
+    header("column security")
+    run([PY, "-m", "governance.policies.apply"])
+    return 0
+
+
 def cmd_lineage(_args: argparse.Namespace) -> int:
     """Emit and render the lineage graph."""
     header("lineage")
@@ -373,6 +388,8 @@ COMMANDS = {
     "docs": cmd_docs,
     "clickhouse-load": cmd_clickhouse_load,
     "metabase-import": cmd_metabase_import,
+    "pii-scan": cmd_pii_scan,
+    "policy-apply": cmd_policy_apply,
     "lineage": cmd_lineage,
     "infra-plan": cmd_infra_plan,
     "infra-destroy": cmd_infra_destroy,

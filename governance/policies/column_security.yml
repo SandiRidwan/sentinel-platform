@@ -1,0 +1,102 @@
+# SENTINEL — column-level security policy.
+#
+# The rule this encodes: an analyst needs prices and ratings, not the raw identifier that
+# connects a row to a person. Masking is declared per column, applied at the warehouse, and
+# the policy file is the reviewable artefact.
+#
+# Applied by governance/policies/apply.py for BigQuery (policy tags) and Snowflake (masking
+# policies). DuckDB has no column-level grants, so the dev target enforces the same intent
+# with a view that projects the safe columns only.
+
+version: 1
+reviewed_at: "2026-10-21"
+owner: data-platform
+
+classifications:
+  # Free text that could contain an identifier.
+  - name: free_text
+    description: "Unstructured text that a human wrote. Must be masked before export."
+    default_action: mask
+  # Direct identifier.
+  - name: identifier
+    description: "A value that identifies a row's subject."
+    default_action: hash
+  # Public reference data.
+  - name: public
+    description: "No restriction. Published by the source."
+    default_action: allow
+
+columns:
+  - table: dim_book
+    column: upc
+    classification: identifier
+    action: hash
+    rationale: >-
+      A product barcode is not personal data, but it is the join key to any external
+      catalogue and therefore to whatever that catalogue knows. Hashed for exports, kept
+      raw inside the warehouse.
+
+  - table: dim_book
+    column: product_url
+    classification: public
+    action: allow
+
+  - table: dim_book
+    column: price
+    classification: public
+    action: allow
+
+  - table: dim_book
+    column: book_title
+    classification: free_text
+    action: mask
+    rationale: >-
+      A product title is normally harmless. It is classified free_text because it is the
+      only column a seller controls, so it is where an email address or a phone number
+      would appear if one appeared at all.
+
+  - table: stg_quotes
+    column: author_name
+    classification: identifier
+    action: hash
+    rationale: "A person's name. Pseudonymised for any consumer outside the pipeline."
+
+  - table: stg_quotes
+    column: quote_text
+    classification: free_text
+    action: mask
+    rationale: "Quoted speech frequently contains contact details and personal anecdotes."
+
+  - table: stg_quotes
+    column: author_url
+    classification: identifier
+    action: mask
+    rationale: "A URL to a person's page is a direct route to their identity."
+
+  - table: dim_country
+    column: country_name
+    classification: public
+    action: allow
+
+  - table: dim_country
+    column: capital_name
+    classification: public
+    action: allow
+
+# Identity is separated from content: a consumer that needs to count unique authors gets a
+# hash, and a consumer that needs the text gets text with identifiers removed. Neither gets
+# both, which is the point.
+separation:
+  identity_columns: [upc, author_name, author_url]
+  content_columns: [book_title, quote_text]
+  rule: >-
+    A single query may project identity or content, never both. Enforced in BigQuery with
+    policy tags on separate taxonomies and in Snowflake with a masking policy that returns
+    NULL when both column families are requested by the same role.
+
+# Retention. Enforced by governance/policies/retention.py.
+retention:
+  raw: 90      # days; re-scrapable, so cheap to drop
+  bronze: 180
+  silver: 365
+  gold: 730    # the system of record for analytics

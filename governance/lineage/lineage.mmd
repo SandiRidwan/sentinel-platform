@@ -1,0 +1,37 @@
+flowchart LR
+    source_book_categories[/"source.book_categories"/]
+    book_categories["book_categories"]
+    source_book_categories --> book_categories
+    source_books[/"source.books"/]
+    books["books"]
+    source_books --> books
+    source_countries[/"source.countries"/]
+    countries["countries"]
+    source_countries --> countries
+    source_hockey[/"source.hockey"/]
+    hockey["hockey"]
+    source_hockey --> hockey
+    source_quotes[/"source.quotes"/]
+    quotes["quotes"]
+    source_quotes --> quotes
+    source_wikipedia[/"source.wikipedia"/]
+    wikipedia["wikipedia"]
+    source_wikipedia --> wikipedia
+    stg_books["stg_books"]
+    dim_book["dim_book"]
+    stg_books --> dim_book
+    dim_category["dim_category"]
+    dim_category --> dim_book
+    stg_book_categories["stg_book_categories"]
+    stg_book_categories --> dim_category
+    stg_countries["stg_countries"]
+    dim_country["dim_country"]
+    stg_countries --> dim_country
+    fct_books["fct_books"]
+    dim_book --> fct_books
+    dim_category --> fct_books
+    stg_hockey_teams["stg_hockey_teams"]
+    fct_hockey_season["fct_hockey_season"]
+    stg_hockey_teams --> fct_hockey_season
+    dim_book_snapshot["dim_book_snapshot"]
+    stg_books --> dim_book_snapshot
