@@ -73,9 +73,17 @@ def dbt_env(target: str) -> dict[str, str]:
     env = dict(os.environ)
     env["DBT_PROFILES_DIR"] = str(DBT_DIR)
     env["DBT_TARGET"] = target
+    # Absolute: dbt runs with cwd=transform/dbt, so the relative DUCKDB_PATH from .env
+    # would resolve inside the dbt project and fail to open.
+    env["DUCKDB_PATH"] = str(get_settings().duckdb_path)
     if target == "bigquery" and not env.get("GCP_PROJECT"):
         env["GCP_PROJECT"] = PLACEHOLDER_PROJECT
     return env
+
+
+def ensure_warehouse_dir() -> None:
+    """dbt-duckdb creates the file, not the directory."""
+    Path(get_settings().duckdb_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def run_dbt(args: list[str], target: str, timeout: int = 600) -> dict:
@@ -221,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     started = time.time()
+    ensure_warehouse_dir()
     report: dict = {
         "ran_at": datetime.now(timezone.utc).isoformat(),
         "claims": {

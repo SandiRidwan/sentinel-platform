@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from tools.common.config import ROOT, get_settings
 
@@ -48,6 +49,11 @@ def run_dbt(args: list[str]) -> int:
     cmd = [sys.executable, "-m", "dbt.cli.main", *args]
     if "--vars" not in args:
         cmd.extend(["--vars", f'{{"silver_root": "{silver_root()}"}}'])
+    # dbt-duckdb creates the database file but not its parent directory. On a fresh clone
+    # and in CI, data/warehouse/ does not exist yet, and dbt fails with "Cannot open file
+    # .../data/warehouse/sentinel.duckdb: No such file or directory" — which reads like a
+    # permissions problem rather than a missing directory.
+    Path(get_settings().duckdb_path).parent.mkdir(parents=True, exist_ok=True)
     print(f">> dbt {' '.join(args)}  (target={dbt_env()['DBT_TARGET']})")
 
     completed = subprocess.run(

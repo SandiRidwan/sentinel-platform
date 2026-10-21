@@ -124,8 +124,13 @@ jobs:
           path: infra/terraform/plan.txt
           retention-days: 14
 
-  warehouse:
-    name: L3 + L4 warehouse
+  # One job, one order. The extensions need the dev warehouse to exist and be populated:
+  # agents.eval queries gold.dim_book, warehouse_parity reads the gold row counts, and the
+  # control register reads both reports. Splitting them into parallel jobs meant each one
+  # had to rebuild the same data or fail on a missing DuckDB file — so the pipeline and
+  # everything that inspects it run in sequence, in the order the data appears.
+  pipeline:
+    name: pipeline + extensions
     runs-on: ubuntu-latest
     needs: [lint-and-unit]
     steps:
@@ -136,17 +141,40 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Start the local stack (object store + warehouse)
+      - name: Start the stack (object store, warehouse, Kafka, Debezium)
         run: |
           cp .env.example .env
-          docker compose up -d --wait s3 postgres
+          docker compose up -d --wait s3 postgres kafka connect
 
-      - name: Seed
+      # --- CDC, before the batch path, so parity compares two independent arrivals ---
+
+      - name: Seed the operational source table
+        run: python -m cdc.seed --mutate
+
+      - name: Register the connector and wait for RUNNING
+        run: python -m cdc.register
+
+      - name: Consume the change stream into Iceberg
+        run: python -m cdc.consumer --timeout 120 --reset
+
+      - name: Prove batch and stream agree
+        run: python -m cdc.parity
+
+      - name: CDC comparator unit tests
+        run: pytest cdc/tests -q
+
+      # --- Batch path ---
+
+      - name: Seed buckets and warehouse schemas
         run: python -m tools.seed
 
       - name: Ingest (live sandbox sources)
@@ -164,10 +192,31 @@ jobs:
       - name: L4 expectation suites
         run: python -m quality.expectations.run_suites
 
+      # --- Everything that reads the warehouse ---
+
+      - name: Warehouse parity (parse + transpile; executes on dev only)
+        run: python -m transform.warehouse_parity
+
+      - name: Agent eval (20 answered, 10 refused)
+        run: python -m agents.eval
+
+      - name: Agent registry tests
+        run: pytest agents/tests -q
+
+      - name: Control register evidence pack
+        run: python -m governance.report
+
+      - name: Edge worker typecheck and tests
+        working-directory: edge
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm test
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: quality-reports
+          name: pipeline-reports
           path: quality/reports/
           retention-days: 14
 
@@ -201,87 +250,10 @@ jobs:
           path: quality/reports/contracts.json
           retention-days: 14
 
-  # The new components, each verified by running it rather than by importing it.
-  # All of these work without a cloud account: CDC uses local containers, the agent and
-  # the control register use the dev warehouse, and the edge worker needs only Node.
-  platform-extensions:
-    name: CDC + agent + controls + edge
-    runs-on: ubuntu-latest
-    needs: [lint-and-unit]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Start Postgres, Kafka and Debezium
-        run: |
-          cp .env.example .env
-          docker compose up -d --wait postgres kafka connect
-
-      - name: Seed the operational source table
-        run: python -m cdc.seed --mutate
-
-      - name: Register the connector and wait for RUNNING
-        run: python -m cdc.register
-
-      - name: Consume the change stream into Iceberg
-        run: python -m cdc.consumer --timeout 120 --reset
-
-      - name: Prove batch and stream agree
-        run: python -m cdc.parity
-
-      - name: CDC comparator unit tests
-        run: pytest cdc/tests -q
-
-      - name: Warehouse parity (parse + transpile, no cloud credentials)
-        run: python -m transform.warehouse_parity
-
-      - name: Agent eval (20 answered, 10 refused)
-        run: python -m agents.eval
-
-      - name: Agent registry tests
-        run: pytest agents/tests -q
-
-      - name: Control register evidence pack
-        run: python -m governance.report
-
-      - name: Edge worker typecheck and tests
-        working-directory: edge
-        run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm test
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: platform-reports
-          path: |
-            quality/reports/cdc_parity.json
-            quality/reports/cdc_consume.json
-            quality/reports/agent_eval.json
-            quality/reports/agent_trace.jsonl
-            quality/reports/controls-report.json
-            quality/reports/controls-report.csv
-            quality/reports/warehouse_parity.json
-          retention-days: 14
-
   gate:
     name: gate
     runs-on: ubuntu-latest
-    needs: [lint-and-unit, go-fetcher, terraform, warehouse, platform-extensions]
+    needs: [lint-and-unit, go-fetcher, terraform, pipeline]
     if: always()
     steps:
       - name: Fail if any required job failed
@@ -289,13 +261,11 @@ jobs:
           echo "lint-and-unit:        ${{ needs.lint-and-unit.result }}"
           echo "go-fetcher:           ${{ needs.go-fetcher.result }}"
           echo "terraform:            ${{ needs.terraform.result }}"
-          echo "warehouse:            ${{ needs.warehouse.result }}"
-          echo "platform-extensions:  ${{ needs.platform-extensions.result }}"
+          echo "pipeline:             ${{ needs.pipeline.result }}"
           if [ "${{ needs.lint-and-unit.result }}" != "success" ] || \
              [ "${{ needs.go-fetcher.result }}" != "success" ] || \
              [ "${{ needs.terraform.result }}" != "success" ] || \
-             [ "${{ needs.warehouse.result }}" != "success" ] || \
-             [ "${{ needs.platform-extensions.result }}" != "success" ]; then
+             [ "${{ needs.pipeline.result }}" != "success" ]; then
             echo "::error::quality gate failed"
             exit 1
           fi

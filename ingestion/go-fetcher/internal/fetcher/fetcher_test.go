@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,16 +116,23 @@ func TestInvalidURLFailsFast(t *testing.T) {
 }
 
 func TestPoolRespectsConcurrencyCeiling(t *testing.T) {
-	var inFlight, peak int
+	// Both counters are written by concurrent HTTP handlers, so they are atomic: without
+	// this, `go test -race` reports a data race in the test itself. The pool under test was
+	// never the problem, but a red gate is red either way, and a race detector that fires on
+	// the harness trains people to ignore it.
+	var inFlight, peak int64
 	release := make(chan struct{})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		inFlight++
-		if inFlight > peak {
-			peak = inFlight
+		current := atomic.AddInt64(&inFlight, 1)
+		for {
+			observed := atomic.LoadInt64(&peak)
+			if current <= observed || atomic.CompareAndSwapInt64(&peak, observed, current) {
+				break
+			}
 		}
 		<-release
-		inFlight--
+		atomic.AddInt64(&inFlight, -1)
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
@@ -150,8 +158,9 @@ func TestPoolRespectsConcurrencyCeiling(t *testing.T) {
 	if len(results) != len(urls) {
 		t.Fatalf("got %d results, want %d", len(results), len(urls))
 	}
-	if peak > 3 {
-		t.Fatalf("concurrency ceiling breached: peak = %d, want <= 3", peak)
+	observedPeak := atomic.LoadInt64(&peak)
+	if observedPeak > 3 {
+		t.Fatalf("concurrency ceiling breached: peak = %d, want <= 3", observedPeak)
 	}
 }
 
