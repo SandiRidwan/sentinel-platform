@@ -446,17 +446,98 @@ def cmd_bench(args: argparse.Namespace) -> int:
     return _rc([PY, "-m", "bench.run", *extra])
 
 
+def cmd_bench_partitioned(args: argparse.Namespace) -> int:
+    """Partitioned write at scale, with the pruning measurement."""
+    header("bench partitioned")
+    extra = list(getattr(args, "rest", []) or [])
+    return _rc([PY, "-m", "bench.partitioned", *extra])
+
+
+def cmd_orchestration_parity(_args: argparse.Namespace) -> int:
+    """Same pipeline through Airflow, Prefect and Dagster; compare row counts."""
+    header("orchestration parity")
+    return _rc([PY, "-m", "orchestration.parity"])
+
+
+def cmd_experiments(_args: argparse.Namespace) -> int:
+    """A/B analysis against a 5% effect and a 0% effect, both known by construction."""
+    header("experiments")
+    return _rc([PY, "-m", "experiments.simulate"])
+
+
+def cmd_trace_parity(_args: argparse.Namespace) -> int:
+    """One run, three trace backends, compared from each backend's own store."""
+    header("trace parity")
+    return _rc([PY, "-m", "agents.trace_parity"])
+
+
+def cmd_portability(_args: argparse.Namespace) -> int:
+    """The same agent through four frameworks over the same 30 eval cases."""
+    header("framework portability")
+    return _rc([PY, "-m", "agents.portability"])
+
+
+def cmd_bi_parity(_args: argparse.Namespace) -> int:
+    """One dashboard spec, four definitions, one ClickHouse; values compared where executed."""
+    header("bi parity")
+    if _rc([PY, "-m", "analytics.render"]) != 0:
+        return 1
+    return _rc([PY, "-m", "analytics.parity"])
+
+
+def cmd_edge_service_test(_args: argparse.Namespace) -> int:
+    """Type-check and test the TypeScript service over the gold layer."""
+    header("edge service")
+    service = ROOT / "edge-service"
+    npm = shutil.which("npm")
+    if not npm:
+        warn("npm not found on PATH")
+        return 1
+    if not (service / "node_modules").exists():
+        if _rc([npm, "install", "--no-audit", "--no-fund"], cwd=service) != 0:
+            return 1
+    if _rc([npm, "run", "typecheck"], cwd=service) != 0:
+        return 1
+    return _rc([npm, "test"], cwd=service)
+
+
+def _compose_running(service: str) -> bool:
+    """True when the named compose service is up. Used to skip checks that need a container."""
+    if not have("docker"):
+        return False
+    result = subprocess.run(
+        ["docker", "compose", "ps", "--services", "--status", "running"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+    return service in (result.stdout or "").split()
+
+
 def cmd_verify(_args: argparse.Namespace) -> int:
     """Every claim the README makes, checked in one command."""
     header("verify all claims")
     steps = [
         ([PY, "-m", "pytest", "-q", "-p", "no:warnings"], ROOT),
         ([PY, "-m", "agents.eval"], ROOT),
+        ([PY, "-m", "agents.portability"], ROOT),
+        ([PY, "-m", "agents.trace_parity"], ROOT),
+        ([PY, "-m", "experiments.simulate"], ROOT),
+        ([PY, "-m", "analytics.render", "--check"], ROOT),
+        ([PY, "-m", "analytics.parity"], ROOT),
         ([PY, "-m", "governance.report"], ROOT),
         ([PY, "-m", "transform.warehouse_parity"], ROOT),
         ([PY, "-m", "cdc.parity"], ROOT),
     ]
     failures = 0
+
+    # The orchestration check needs the Airflow container. Skipping it when the stack is down
+    # is honest; skipping it when the stack is up would hide a regression.
+    if _compose_running("airflow-scheduler"):
+        steps.append(([PY, "-m", "orchestration.parity"], ROOT))
+    else:
+        warn("orchestration parity skipped: airflow-scheduler is not running (make up)")
+
     for step, cwd in steps:
         label = " ".join(step[2:])
         if _rc(step, cwd=cwd) != 0:
@@ -502,6 +583,13 @@ COMMANDS = {
     "controls": cmd_controls,
     "warehouse-parity": cmd_warehouse_parity,
     "bench": cmd_bench,
+    "bench-partitioned": cmd_bench_partitioned,
+    "orchestration-parity": cmd_orchestration_parity,
+    "experiments": cmd_experiments,
+    "trace-parity": cmd_trace_parity,
+    "portability": cmd_portability,
+    "bi-parity": cmd_bi_parity,
+    "edge-service-test": cmd_edge_service_test,
     "verify": cmd_verify,
     "infra-plan": cmd_infra_plan,
     "infra-destroy": cmd_infra_destroy,

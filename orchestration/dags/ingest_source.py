@@ -12,7 +12,7 @@ governance/sources.yml. An unapproved source should not cost a single HTTP reque
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from airflow import DAG
 from airflow.decorators import task

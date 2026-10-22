@@ -53,6 +53,13 @@ TARGETS = {
 
 DIALECTS = {"snowflake": "snowflake", "bigquery": "bigquery"}
 
+# Redshift is checked as a dialect, not as an adapter. There is no dbt-redshift in the
+# environment and no cluster to run against, so claiming "parsed" would be a statement about
+# a package that is not installed. What can be checked offline is real: every model compiles
+# to Redshift SQL, including the `create table as` shape dbt-redshift would emit, and the
+# result parses back. The report calls this "compiled, not executed".
+DIALECT_ONLY = {"redshift": "redshift"}
+
 # A project name is required by the BigQuery adapter at profile load, but parsing does
 # not contact Google. A placeholder keeps the parse offline and honest: the report says
 # `executed: false` for this target regardless.
@@ -266,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if target == "dev":
             entry["executed"] = True
+            entry["status"] = "executed"
             entry["models"] = len(models)
             entry["row_counts"] = local_counts
         else:
@@ -274,10 +282,12 @@ def main(argv: list[str] | None = None) -> int:
             failed = {model: result for model, result in results.items() if not result["ok"]}
             entry["transpiled_models"] = len(results)
             entry["transpile_failures"] = failed
+            entry["status"] = "executed" if entry["executed"] else "compiled, not executed"
 
             if args.with_cloud and entry["credentials_present"]:
                 entry["cloud"] = cloud_parity(target, models, local_counts)
                 entry["executed"] = bool(entry["cloud"].get("executed"))
+                entry["status"] = "executed" if entry["executed"] else "compiled, not executed"
             elif args.with_cloud:
                 entry["cloud"] = {"executed": False, "reason": "credentials not set"}
             else:
@@ -285,9 +295,41 @@ def main(argv: list[str] | None = None) -> int:
 
         report["targets"][target] = entry
 
+    # Dialect-only targets: no adapter, no connection, but the SQL still has to be valid.
+    for target, dialect in DIALECT_ONLY.items():
+        selects = {model: transpile_check(sql, dialect) for model, sql in models.items()}
+        # dbt-redshift materialises a table with CTAS, so the DDL shape is checked too rather
+        # than assuming a working SELECT implies a working CREATE.
+        ctas = {
+            model: transpile_check(f'create table "gold"."{model}" as {sql}', dialect)
+            for model, sql in models.items()
+        }
+        failures = {
+            model: result
+            for model, result in {**selects, **{f"ctas:{name}": value for name, value in ctas.items()}}.items()
+            if not result["ok"]
+        }
+        report["targets"][target] = {
+            "adapter": None,
+            "dialect": dialect,
+            "parsed": None,
+            "credentials_present": False,
+            "executed": False,
+            "status": "compiled, not executed",
+            "transpiled_models": len(selects),
+            "transpiled_ddl": len(ctas),
+            "transpile_failures": failures,
+            "cloud": {
+                "executed": False,
+                "reason": "no dbt-redshift adapter and no cluster; dialect check only",
+            },
+        }
+
     failures = 0
     for target, entry in report["targets"].items():
-        if not entry["parsed"]:
+        # `parsed` is None for a dialect-only target: there is no adapter to parse with, and
+        # treating that as a failure would fail a check that was never attempted.
+        if entry.get("parsed") is False:
             failures += 1
         if target != "dev" and entry.get("transpile_failures"):
             failures += 1
@@ -305,18 +347,19 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"models compiled        : {len(models)}")
     for target, entry in report["targets"].items():
-        state = "executed" if entry["executed"] else "not executed"
+        state = "executed" if entry["executed"] else entry.get("status", "not executed")
+        parsed = "dialect-only" if entry.get("parsed") is None else str(entry["parsed"])
         extra = ""
         if target != "dev":
             extra = f" transpiled={entry['transpiled_models']} failures={len(entry['transpile_failures'])}"
-        print(f"  {target:<10} parsed={entry['parsed']!s:<5} {state:<12}{extra}")
+        print(f"  {target:<10} parsed={parsed:<12} {state:<22}{extra}")
     print(f"executed on            : {', '.join(report['executed_on'])}")
     print(f"NOT executed           : {', '.join(report['not_executed']) or 'none'}")
     print(f"RESULT                 : {report['result']}")
 
     if failures:
         for target, entry in report["targets"].items():
-            if not entry["parsed"]:
+            if entry.get("parsed") is False:
                 print(f"  -> {target}: the adapter is not available or the profile is invalid")
                 if entry.get("parse_tail"):
                     for line in entry["parse_tail"].splitlines()[-3:]:

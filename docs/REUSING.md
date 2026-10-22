@@ -1,6 +1,6 @@
 # Reusing SENTINEL
 
-This repository is one person's platform, but four of its parts are general. Each section
+This repository is one person's platform, but seven of its parts are general. Each section
 below says what the part does, what you must change to use it, and what it deliberately
 does not do.
 
@@ -164,12 +164,72 @@ the local target.
 
 ---
 
+## 6. One dashboard, four tools, one number
+
+**What it gives you.** `analytics/dashboard_spec.yml` defines each card once — SQL and
+display — and `analytics/render.py` produces Metabase JSON, a Superset import bundle, a
+Looker Studio community connector and a Sigma workbook mapping. `analytics/parity.py` then
+reads the SQL back out of every rendered file and compares it with the spec, runs it against
+ClickHouse, and compares the result with what Metabase returns through its own API.
+
+**Files to copy**
+
+```
+analytics/dashboard_spec.yml   <- your cards (this is the only file you must write)
+analytics/render.py            <- the four renderers
+analytics/parity.py            <- the SQL and value comparison
+analytics/metabase/            <- importer over the HTTP API
+```
+
+**What you must change.** The spec: card SQL, display type, and the dashboard grouping.
+Point `METABASE_URL` at your instance. If you have Superset, add its importer next to
+Metabase's — the pattern is the same.
+
+**What it does not do.** It does not prove a tool ran a card unless it did. `parity.py`
+reports `executed` or `compiled, not executed` per target, with the reason. A rendered
+Superset bundle that was never imported is not evidence that Superset works; it is evidence
+that the definition is not tool-specific.
+
+**The rule that generalises.** Define the number once. The moment two dashboards carry two
+copies of a query, "the dashboard is wrong" becomes unanswerable — there is no single place
+that could be right.
+
+---
+
+## 7. Proving an orchestrator migration
+
+**What it gives you.** One pipeline implementation, three thin scheduler wrappers, and a
+comparison that fails when the row counts differ or when one orchestrator produced no result.
+
+**Files to copy**
+
+```
+orchestration/shared/pipeline.py    <- your pipeline, once
+orchestration/prefect/flows.py      <- wrapper: flow + task
+orchestration/dagster/assets.py     <- wrapper: asset + materialize
+orchestration/dags/pipeline_parity.py  <- wrapper: one PythonOperator
+orchestration/parity.py             <- the comparison and its self-test
+```
+
+**What you must change.** Only `shared/pipeline.py`. The wrappers should stay empty of logic;
+the moment one of them transforms something, the comparison stops testing orchestrators.
+
+**What it does not do.** It compares row counts, not content — two runs could agree on 57
+rows and disagree on which 57. Catching that needs a checksum per table, and is a different
+check.
+
+**The part that is easy to get wrong.** A missing result is a failure, not a skip. Comparing
+the two orchestrators that produced output is the interesting way to get a false pass.
+
+---
+
 ## What is intentionally not reusable
 
 - `ingestion/` — the spiders are shaped around three specific sandbox sites.
-- `orchestration/dags/` — the DAGs encode this platform's schedule.
+- `orchestration/dags/` — the DAGs encode this platform's schedule (the shared pipeline
+  module and the parity check are reusable; the schedule is not).
 - `infra/` — the Terraform is for this account layout.
 
-The four parts above are the ones written to be lifted. If you adapt one and hit something
+The seven parts above are the ones written to be lifted. If you adapt one and hit something
 the docs did not cover, that is a documentation bug — the ADRs record why each decision was
 made, so the reasoning should be checkable even where the code does not fit.

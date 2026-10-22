@@ -8,6 +8,14 @@ name: quality
 #   so they run on the main branch and on a schedule. On pull requests the fast levels gate
 #   the change; the slow ones would make every push wait on someone else's server.
 # - Nothing here is allowed to "continue on error". A gate that can be ignored is decoration.
+# - Three checks need infrastructure this runner does not have and are deliberately not here:
+#     orchestration parity  needs the Airflow scheduler container
+#     trace parity          needs a Phoenix server
+#     BI parity             needs Metabase with the ClickHouse driver
+#     bench 100M            needs about ten minutes and 1.5 GB of scratch space
+#   They run locally through `make verify`, and their reports are cited in the README with
+#   the machine and the row counts they were measured at. Listing them here so their absence
+#   is a decision rather than an oversight.
 
 on:
   push:
@@ -45,13 +53,13 @@ jobs:
           pip install -r requirements.txt
 
       - name: ruff
-        run: ruff check tools ingestion transform quality cdc agents governance bench --output-format=github
+        run: ruff check tools ingestion transform quality cdc agents governance bench analytics experiments orchestration --output-format=github
 
       - name: mypy (non-blocking on third-party stubs)
         run: mypy tools --ignore-missing-imports || true
 
       - name: pytest
-        run: pytest quality/unit -q --cov=tools --cov-report=term-missing
+        run: pytest quality/unit experiments/tests -q --cov=tools --cov-report=term-missing
 
   go-fetcher:
     name: L1 go vet + test
@@ -223,11 +231,35 @@ jobs:
       - name: Agent registry tests
         run: pytest agents/tests -q
 
+      # The same agent through three frameworks. CrewAI is excluded here on purpose: it
+      # needs its own interpreter because its pins conflict with the platform's
+      # langchain/langgraph, and building that venv in CI would test pip, not portability.
+      # `make portability` runs all four locally.
+      - name: Framework portability (langgraph, langchain, llamaindex)
+        run: python -m agents.portability --frameworks langgraph,langchain,llamaindex
+
+      - name: Experiment analysis against a known effect
+        run: python -m experiments.simulate
+
+      # The rendered dashboard definitions are tracked, so a spec edit that was not
+      # re-rendered is a red job rather than a stale file nobody notices.
+      - name: Dashboard definitions are up to date
+        run: python -m analytics.render --check
+
       - name: Control register evidence pack
         run: python -m governance.report
 
       - name: Edge worker typecheck and tests
         working-directory: edge
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm test
+
+      # The TypeScript service is a second language surface, so it gets the same treatment:
+      # typecheck and tests, with the warehouse client injected so no ClickHouse is needed.
+      - name: Edge service typecheck and tests
+        working-directory: edge-service
         run: |
           npm install --no-audit --no-fund
           npm run typecheck

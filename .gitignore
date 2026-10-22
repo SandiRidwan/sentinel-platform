@@ -31,7 +31,15 @@ webserver_config.py
 # exist on anyone else's machine.
 data/iceberg/
 data/staging/zones/silver/books_bench/
+data/bench_partitioned/
+data/bench_spill/
+# The orchestration parity result Airflow writes from inside its container.
+data/_parity/
 edge/node_modules/
+edge-service/node_modules/
+# CrewAI needs its own interpreter (its pins conflict with the platform's langchain), so the
+# portability check runs it from here. It is a local environment, never a source directory.
+.venv-crewai/
 
 # --- Spark / Iceberg / warehouse ---
 spark-warehouse/

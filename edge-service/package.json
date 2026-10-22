@@ -1,0 +1,21 @@
+{
+  "name": "sentinel-edge-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TypeScript service over the gold layer. Metadata is cacheable, inventory is not.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --experimental-strip-types src/index.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9"
+  }
+}

@@ -11,7 +11,7 @@ shape is worse than one that did not run.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from airflow import DAG
 from airflow.decorators import task

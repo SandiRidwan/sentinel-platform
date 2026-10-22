@@ -55,7 +55,6 @@ def ensure_setup(client: httpx.Client, base: str) -> None:
     if not token:
         return  # already set up
 
-    settings = get_settings()
     payload = {
         "token": token,
         "user": {

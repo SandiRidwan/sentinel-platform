@@ -8,7 +8,9 @@ RUN := $(PY) -m tools.tasks.runner
 .DEFAULT_GOAL := help
 .PHONY: help doctor up down restart logs seed scrape quality test docs lineage \
         clickhouse-load metabase-import infra-plan infra-destroy k8s-up k8s-down clean all \
-        cdc agent-eval ask edge-test controls warehouse-parity bench verify
+        cdc agent-eval ask edge-test controls warehouse-parity bench verify \
+        bench-partitioned orchestration-parity experiments trace-parity portability bi-parity \
+        edge-service-test
 
 help:            ## show this help
 	@$(RUN) help
@@ -90,6 +92,27 @@ warehouse-parity: ## parse, transpile and (with credentials) execute across targ
 
 bench:           ## capacity benchmark at 10M rows
 	$(RUN) bench
+
+bench-partitioned: ## 100M rows, partitioned vs flat vs Iceberg, and what pruning buys
+	$(RUN) bench-partitioned
+
+orchestration-parity: ## the same pipeline through Airflow, Prefect and Dagster
+	$(RUN) orchestration-parity
+
+experiments:     ## A/B analysis against a known 5% effect and a known 0% effect
+	$(RUN) experiments
+
+trace-parity:    ## one run, three trace backends, read back from each
+	$(RUN) trace-parity
+
+portability:     ## the same agent through four frameworks over 30 cases
+	$(RUN) portability
+
+bi-parity:       ## one dashboard spec, four definitions, values compared where executed
+	$(RUN) bi-parity
+
+edge-service-test: ## type-check and test the TypeScript service
+	$(RUN) edge-service-test
 
 verify:          ## check every claim the README makes, in one command
 	$(RUN) verify

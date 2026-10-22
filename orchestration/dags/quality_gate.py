@@ -46,7 +46,6 @@ with DAG(
     def run_level(level: str, module: str, args: list[str]) -> dict:
         """Run one level. check=False so the report captures the failure text."""
         if module == "quality.unit":
-            import sys
 
             result = run_module("pytest", "quality/unit", *args, check=False, timeout=900)
         else:

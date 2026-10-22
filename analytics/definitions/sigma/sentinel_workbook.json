@@ -1,0 +1,67 @@
+{
+  "name": "SENTINEL catalogue",
+  "description": "Inventory, pricing and hockey-season metrics from the gold layer.",
+  "source": {
+    "type": "warehouse-table",
+    "connection": "SENTINEL ClickHouse",
+    "dialect": "clickhouse"
+  },
+  "pages": [
+    {
+      "name": "Inventory by category",
+      "elements": [
+        {
+          "id": "inventory_by_category",
+          "title": "Inventory value by category",
+          "visualization": "bar",
+          "sql": "SELECT coalesce(category_name, '(no category)') AS category_name, products, inventory_value FROM sentinel.v_inventory_by_category ORDER BY inventory_value DESC LIMIT 15"
+        },
+        {
+          "id": "products_per_category",
+          "title": "Products per category",
+          "visualization": "table",
+          "sql": "SELECT coalesce(category_name, '(no category)') AS category_name, products FROM sentinel.v_inventory_by_category ORDER BY products DESC LIMIT 20"
+        }
+      ]
+    },
+    {
+      "name": "Price and rating",
+      "elements": [
+        {
+          "id": "avg_price_by_rating",
+          "title": "Average price by rating",
+          "visualization": "bar",
+          "sql": "SELECT toString(rating) AS rating, round(avg(price), 2) AS avg_price, count() AS products FROM sentinel.fct_books WHERE rating IS NOT NULL GROUP BY rating ORDER BY rating"
+        },
+        {
+          "id": "stock_status",
+          "title": "Stock status",
+          "visualization": "pie",
+          "sql": "SELECT if(is_in_stock, 'in stock', 'out of stock') AS status, count() AS products FROM sentinel.fct_books GROUP BY status"
+        }
+      ]
+    },
+    {
+      "name": "Hockey season trends",
+      "elements": [
+        {
+          "id": "avg_goals_by_season",
+          "title": "Average goals for by season",
+          "visualization": "line",
+          "sql": "SELECT season_year, round(avg(goals_for), 2) AS avg_goals_for, round(avg(goals_against), 2) AS avg_goals_against FROM sentinel.fct_hockey_season GROUP BY season_year ORDER BY season_year"
+        },
+        {
+          "id": "best_win_rates",
+          "title": "Best win rates",
+          "visualization": "table",
+          "sql": "SELECT team_name, round(avg(win_rate_recomputed), 3) AS win_rate, count() AS seasons FROM sentinel.fct_hockey_season WHERE win_rate_recomputed IS NOT NULL GROUP BY team_name ORDER BY win_rate DESC LIMIT 15"
+        }
+      ]
+    }
+  ],
+  "status": {
+    "rendered": true,
+    "executed": false,
+    "reason": "Sigma's workbook import format is not public; no trial access was used"
+  }
+}

@@ -1,0 +1,85 @@
+# One dashboard, defined once.
+#
+# Why a neutral spec instead of four hand-built dashboards: the interesting claim is not
+# "I can click in Superset". It is that the same card — the same number, from the same SQL,
+# over the same ClickHouse — is defined identically in four tools. Building them by hand
+# guarantees drift the moment one number changes.
+#
+# The SQL is ClickHouse dialect and is the only place a card's number is defined. Every
+# renderer copies it verbatim; `analytics/parity.py` asserts that, and then checks the
+# values against ClickHouse and, where a tool is reachable, against the tool itself.
+#
+# Status per target is recorded honestly:
+#   metabase        executed  (imports over the HTTP API, cards queried through the API)
+#   superset        compiled  (import bundle in Superset's format; not executed — see ADR 0018)
+#   looker_studio   compiled  (community connector in Apps Script; needs a Google account)
+#   sigma           compiled  (workbook mapping; Sigma's import format is not public)
+
+dashboard:
+  name: SENTINEL catalogue
+  description: Inventory, pricing and hockey-season metrics from the gold layer.
+
+cards:
+  - id: inventory_by_category
+    title: Inventory value by category
+    display: bar
+    dimensions: [category_name]
+    metrics: [inventory_value]
+    sql: >-
+      SELECT coalesce(category_name, '(no category)') AS category_name, products, inventory_value
+      FROM sentinel.v_inventory_by_category ORDER BY inventory_value DESC LIMIT 15
+
+  - id: products_per_category
+    title: Products per category
+    display: table
+    sql: >-
+      SELECT coalesce(category_name, '(no category)') AS category_name, products
+      FROM sentinel.v_inventory_by_category ORDER BY products DESC LIMIT 20
+
+  - id: avg_price_by_rating
+    title: Average price by rating
+    display: bar
+    dimensions: [rating]
+    metrics: [avg_price]
+    sql: >-
+      SELECT toString(rating) AS rating, round(avg(price), 2) AS avg_price, count() AS products
+      FROM sentinel.fct_books WHERE rating IS NOT NULL GROUP BY rating ORDER BY rating
+
+  - id: stock_status
+    title: Stock status
+    display: pie
+    dimensions: [status]
+    metrics: [products]
+    sql: >-
+      SELECT if(is_in_stock, 'in stock', 'out of stock') AS status, count() AS products
+      FROM sentinel.fct_books GROUP BY status
+
+  - id: avg_goals_by_season
+    title: Average goals for by season
+    display: line
+    dimensions: [season_year]
+    metrics: [avg_goals_for, avg_goals_against]
+    sql: >-
+      SELECT season_year, round(avg(goals_for), 2) AS avg_goals_for,
+      round(avg(goals_against), 2) AS avg_goals_against
+      FROM sentinel.fct_hockey_season GROUP BY season_year ORDER BY season_year
+
+  - id: best_win_rates
+    title: Best win rates
+    display: table
+    sql: >-
+      SELECT team_name, round(avg(win_rate_recomputed), 3) AS win_rate, count() AS seasons
+      FROM sentinel.fct_hockey_season WHERE win_rate_recomputed IS NOT NULL
+      GROUP BY team_name ORDER BY win_rate DESC LIMIT 15
+
+# Which cards appear on which dashboard, so the rendered dashboards are not one long list.
+dashboards:
+  - name: Inventory by category
+    description: Where the catalogue's value sits, by category.
+    cards: [inventory_by_category, products_per_category]
+  - name: Price and rating
+    description: How the catalogue is priced, and whether rating correlates with price.
+    cards: [avg_price_by_rating, stock_status]
+  - name: Hockey season trends
+    description: Goals per game and win rate across seasons.
+    cards: [avg_goals_by_season, best_win_rates]

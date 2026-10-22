@@ -16,11 +16,13 @@ COPY orchestration/requirements.txt /requirements-airflow.txt
 RUN pip install --no-cache-dir -r /requirements-airflow.txt
 
 # The platform. dags/, tools/, governance/ and transform/ must all be importable.
-COPY tools/ /opt/sentinel/tools/
-COPY governance/ /opt/sentinel/governance/
-COPY ingestion/ /opt/sentinel/ingestion/
-COPY transform/ /opt/sentinel/transform/
-COPY quality/ /opt/sentinel/quality/
+COPY --chown=airflow:root tools/ /opt/sentinel/tools/
+COPY --chown=airflow:root governance/ /opt/sentinel/governance/
+COPY --chown=airflow:root ingestion/ /opt/sentinel/ingestion/
+COPY --chown=airflow:root transform/ /opt/sentinel/transform/
+COPY --chown=airflow:root quality/ /opt/sentinel/quality/
+# The shared pipeline module is imported by the DAG, so it must be inside the image.
+COPY --chown=airflow:root orchestration/shared/ /opt/sentinel/orchestration/shared/
 
 ENV PYTHONPATH=/opt/sentinel \
     SENTINEL_ROOT=/opt/sentinel \

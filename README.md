@@ -126,6 +126,42 @@ otherwise have to discover:
   keeps the old files: 9.17 MB → 14.20 MB. The report carries `space_reclaimed: false`
   rather than calling it compaction (ADR 0014).
 
+### Scale and experiments
+
+Measured on the same machine. The first column is the claim; the second is the number the
+command printed; the third is the command.
+
+| Claim | Result | Command |
+|---|---|---|
+| Three orchestrators, one pipeline | **5/5 gold tables identical** across airflow, prefect, dagster (57 / 50 / 250 / 57 / 250) | `make orchestration-parity` |
+| 100M rows, partitioned by day | **100 files · 132 MB · 987,588 rows/s** (parquet) · **859,218 rows/s** (Iceberg, 100 snapshots) | `make bench-partitioned` |
+| Partition pruning, 100M rows | filtered **5.7 ms** vs full scan **94.8 ms** · **1 file of 100** read (16.6×) | `make bench-partitioned` |
+| Iceberg pruning, 100M rows | filtered **7.0 ms** vs full scan **131.3 ms** · `plan_files()` returns **1 of 100** (18.7×) | `make bench-partitioned` |
+| A/B analysis against a known effect | 5% lift → **significant** (estimate 5.04%) · 0% lift → **not significant** (p=0.737) · CUPED **−87.9%** variance | `make experiments` |
+| Trace portability | **9 spans** with identical names and attribute keys in JSONL, Phoenix and LangSmith's wire format | `make trace-parity` |
+| Agent framework portability | **30/30 cases in each of 4 frameworks** (LangGraph, LangChain, LlamaIndex, CrewAI), answers identical | `make portability` |
+| BI parity | **6 cards · identical SQL in 4 definitions** · Metabase returns **6/6** the same numbers as ClickHouse | `make bi-parity` |
+| Warehouse portability, widened | 10 models parsed on 3 adapters, transpiled to **3 dialects** (snowflake, bigquery, redshift) · executed on 1 | `make warehouse-parity` |
+| TypeScript service over gold | **10 tests · typecheck clean** · ClickHouse queried through bound parameters | `make edge-service-test` |
+
+The unflattering rows, stated rather than buried:
+
+- **Snowflake and BigQuery were not executed.** The dbt project parses under both adapters and
+  every model transpiles to both dialects (and to Redshift, including the `create table as`
+  form dbt would emit), but `executed_on: ["dev"]` says only DuckDB was built. There is no
+  Snowflake account behind this repository, so the report says `compiled, not executed`
+  instead of implying otherwise.
+- **LangSmith was not hosted.** The payload is produced by LangSmith's own SDK and posted to a
+  local receiver that validates the ingest contract; the spans are then read back from that
+  receiver. No account was used, so "the hosted service accepted it" is not claimed.
+- **Superset, Looker Studio and Sigma are compiled, not executed.** One spec renders four
+  definitions that carry the *same SQL*; Metabase is the only second BI tool actually run.
+  Superset's stock image has no ClickHouse driver, Looker Studio needs a Google account, and
+  Sigma's import format is not public. The report names each one's status separately.
+- **CrewAI runs in its own virtualenv.** Its pins do not resolve with the platform's
+  langchain/langgraph, so the portability check drives it as a subprocess. That is the finding,
+  not a workaround: the four frameworks do not coexist in one environment.
+
 
 Per-table silver rows:
 
@@ -139,7 +175,7 @@ Per-table silver rows:
 
 ---
 
-## 🧩 The eleven components
+## 🧩 The sixteen components
 
 | # | Component | What it does | Verified by |
 |---|---|---|---|
@@ -154,12 +190,17 @@ Per-table silver rows:
 | 9 | **ClickHouse + Metabase** | Analytical serving + dashboards as code | 15/5/10 rows per card |
 | 10 | **Governance** | PII scan, column security, OpenLineage | 9 policies, 14 edges |
 | 11 | **Terraform + K8s** | Lake, warehouse, budget; real kind deploy | plan exit 0, 3 endpoints 200 |
+| 12 | **Prefect + Dagster** | The same pipeline module through two more schedulers | 5/5 tables identical to Airflow |
+| 13 | **Experiment analysis** | Deterministic assignment, power, CUPED, guardrail | 5% found, 0% not found |
+| 14 | **Trace export** | OTLP to Phoenix, LangSmith wire format, one local JSONL | 9 spans in all three |
+| 15 | **BI parity** | One dashboard spec rendered into four tools | 6 cards, 6/6 values match |
+| 16 | **TypeScript service** | Hono over ClickHouse with bound parameters | 10 tests, typecheck clean |
 
 ---
 
 ## ⚡ Engineering problems solved
 
-Fifteen real failures, each found by running the thing rather than assuming it worked.
+Nineteen real failures, each found by running the thing rather than assuming it worked.
 The error text is quoted because it is the only proof the problem was real.
 
 ### Challenge 1 — The two writers that disagreed about a column
@@ -294,6 +335,47 @@ no EC2 IMDS role found ... dial tcp 169.254.169.254:80
 **Fix:** Snowflake moved to its own stack; AWS skip-flags set when cloud resources are
 disabled. The plan now exits 0 with no credentials — which is what CI needs.
 
+### Challenge 16 — The benchmark that blamed the layout for the reader's cost
+
+At 2M rows the partitioned layout measured **149 ms** against **21 ms** for a flat directory.
+The obvious conclusion — "partitioning does not help" — was wrong. DuckDB expands
+`partitioned/**/*.parquet`, opens every file, and only then applies `WHERE day = 50`. The
+glob was being timed, not the layout.
+
+**Fix:** the measurement names the partition's files, which is what a partition-aware reader
+does, and the glob number is reported next to it with the explanation. At 100M rows: 5.7 ms
+pruned vs 94.8 ms full scan, 1 file of 100 (ADR 0016).
+
+### Challenge 17 — The flat layout that pruned anyway
+
+The flat copy was meant to be the negative control: no partition key, so no pruning. It came
+back **8× faster** than its own full scan (11.0 ms vs 87.6 ms). The rows were sorted by day,
+so Parquet row-group statistics skipped almost every row group. Real pruning, at a level the
+control had not accounted for.
+
+**Fix:** a second flat copy with the day values scrambled — every row group now spans all
+100 days, and the speed-up disappears (146 ms filtered vs 91 ms unfiltered; filtering costs
+more than it saves when the column cannot be pruned). Partitioning now wins against a control
+that can actually lose.
+
+### Challenge 18 — A missing key is not `false`
+
+The four-framework check reported identical answers everywhere and then failed on
+"answers are identical across frameworks". The strings were the same. CrewAI's worker omitted
+`refused` when it was false, and `None != False` is enough to fail a comparison.
+
+**Fix:** every framework's end state goes through one `_shape()` function before comparison.
+The check was right; the normalisation was missing.
+
+### Challenge 19 — Comparing durations between two runs
+
+The first trace-parity check ran the agent twice and compared total durations with a 25%
+tolerance. It failed at 20 ms vs 57 ms, with nothing wrong with the export: two runs on a
+shared machine differ by more than any tolerance that would still catch a real bug.
+
+**Fix:** one run, three backends, and the spans are read back from each backend's own store.
+Durations are carried as data and explicitly not compared (ADR 0018).
+
 ---
 
 ## 🛡️ The governance gate
@@ -398,8 +480,13 @@ sentinel-platform/
 │   └── lineage/                OpenLineage events · Mermaid graph
 ├── cdc/                        Debezium → Kafka → Iceberg · batch/stream parity
 ├── agents/                     plan → act → verify · registry-bounded tools · 30-case eval
+│   └── export/                 OTLP (Phoenix) · LangSmith wire format · local receiver
+├── experiments/                deterministic assignment · power · CUPED · known-effect tests
+├── analytics/                  one dashboard spec → Metabase · Superset · Looker · Sigma
 ├── edge/                       TypeScript worker · metadata cached, inventory never
-├── bench/                      10M-row generator and four-layer measurement
+├── edge-service/               TypeScript service over gold · Hono · 10 tests
+├── orchestration/              Airflow DAGs · Prefect flows · Dagster assets · shared module
+├── bench/                      10M-row generator · 100M partitioned write · four layers
 ├── quality/
 │   ├── unit/  contract/  warehouse/  expectations/     four levels
 │   └── reports/                generated, gitignored
@@ -408,7 +495,7 @@ sentinel-platform/
 │   └── k8s/                    kind config · 5 manifests
 ├── observability/              prometheus rules · grafana dashboard · OTel collector
 ├── docs/
-│   ├── adr/                    10 architecture decision records
+│   ├── adr/                    18 architecture decision records
 │   ├── rfc/                    1 RFC (proposed, not built)
 │   ├── runbooks/               4 incident runbooks
 │   ├── CODE_REVIEW.md
@@ -475,14 +562,24 @@ make agent-eval      # 20 questions answered, 10 refused
 make ask Q="how many books are out of stock?"
 make edge-test       # typecheck + 12 tests, no Cloudflare account
 make controls        # control register → JSON + CSV evidence pack
-make warehouse-parity # parse on 3 adapters, transpile to 2 dialects
+make warehouse-parity # parse on 3 adapters, transpile to 3 dialects
 make bench           # 10M rows: generate, dbt build, p50/p95, Iceberg append
+make bench-partitioned # 100M rows: partitioned vs flat vs Iceberg, and pruning
+make orchestration-parity # Airflow, Prefect and Dagster, one row count
+make experiments     # a 5% effect that must be found, a 0% effect that must not
+make trace-parity    # one run, three trace backends, read back from each
+make portability     # the same agent through four frameworks, 30 cases
+make bi-parity       # one dashboard spec, four definitions, values compared
+make edge-service-test # typecheck + 10 tests against a ClickHouse-shaped client
 make verify          # every claim above, checked in one command
 ```
 
 `make verify` is the one to run if you only run one. It executes the unit tests, the agent
-eval, the control register, the portability check and the CDC parity comparison, and exits
-non-zero if any of them stops being true.
+eval, the framework portability check, the trace parity check, the experiment analysis, the
+dashboard render check and BI parity, the control register, warehouse portability and CDC
+parity, and exits non-zero if any of them stops being true. Orchestration parity is included
+when the Airflow container is up, and skipped with a warning when it is not — a skip that
+says so, not a silent pass.
 
 ---
 
@@ -492,30 +589,46 @@ non-zero if any of them stops being true.
 |---|---|
 | **Ingestion** | Scrapy 2.13 · utls (JA3/JA4 ClientHello) · curl_cffi · Playwright · mitmproxy |
 | **Service** | Go 1.22 · stdlib HTTP · hand-rolled token bucket · Prometheus text exposition |
-| **Orchestration** | Airflow 2.10 · TaskFlow · dynamic task mapping · ExternalTaskSensor · SLA callbacks |
+| **Orchestration** | Airflow 2.10 · Prefect 3 · Dagster 1.9 — one shared pipeline module |
 | **Transform** | PySpark 3.5 · Apache Iceberg v2 · pandas fallback |
 | **Modeling** | dbt 1.9 · star schema · Type-2 SCD snapshot · custom generic test · dual target |
-| **Warehouse** | DuckDB (dev) · BigQuery · Snowflake — one set of models |
-| **Serving** | ClickHouse 25.4 (ReplacingMergeTree) · Metabase (dashboards as code) |
+| **Warehouse** | DuckDB (dev) · BigQuery · Snowflake · Redshift dialect — one set of models |
+| **Serving** | ClickHouse 25.4 (ReplacingMergeTree) · Metabase · Superset · Looker Studio · Sigma |
 | **Quality** | pytest · Scrapy contracts · dbt tests · Great Expectations · CI gate |
 | **Governance** | Source register · PII masking + independent scan · column-level security · OpenLineage |
+| **Experiments** | Deterministic hash assignment · power/MDE · CUPED · known-effect tests |
+| **Agents** | LangGraph · LangChain · LlamaIndex · CrewAI · OTLP + LangSmith trace export |
+| **Service (TS)** | TypeScript · Hono · Vitest · bound parameters, no string SQL |
 | **Infra** | Terraform (S3 lifecycle · BigQuery · budget) · Kubernetes (kind) · Docker Compose |
-| **Observability** | Prometheus rules · Grafana · OpenTelemetry collector |
+| **Observability** | Prometheus rules · Grafana · OpenTelemetry collector · Phoenix |
 
 ---
 
 ## ⚠️ Limitations (honest)
 
-- **Scale is local.** Hundreds of thousands of rows, hundreds of requests per minute. The
-  warehouse work is real; the volume is not enterprise. The benchmark reaches ten million
-  rows on one machine, single-process, and says nothing about throughput under concurrency.
+- **Scale is local.** Hundreds of thousands of rows in the pipeline, hundreds of requests per
+  minute. The benchmark writes 100 million rows on one machine, single-process, and says
+  nothing about throughput under concurrency.
+- **The 100M benchmark is one machine's disk.** Partition pruning is measured as files read
+  and as wall time on this laptop; a cluster with a real object store would show different
+  absolute numbers, which is why the report carries file counts next to timings.
 - **The CDC consumer keeps the whole topic in memory.** Correct at 638 events; a streaming
   fold with a state store would be needed at millions.
 - **The CDC Iceberg rewrite does not reclaim disk.** pyiceberg 0.9 has no
   `rewrite_data_files` or `expire_snapshots`; the benchmark reports `space_reclaimed: false`
   instead of calling it compaction.
-- **Snowflake and BigQuery were parsed and transpiled, not built.** `executed_on: ["dev"]`
-  in `quality/reports/warehouse_parity.json` is the honest scope.
+- **Snowflake, BigQuery and Redshift were parsed and transpiled, not built.**
+  `executed_on: ["dev"]` in `quality/reports/warehouse_parity.json` is the honest scope.
+  There is no Snowflake account behind this repository.
+- **LangSmith was not hosted.** The payload comes from LangSmith's SDK and is read back from a
+  local receiver implementing the ingest contract. Trace *format* portability is proven;
+  "LangSmith's service accepted it" is not.
+- **Superset, Looker Studio and Sigma are compiled, not executed.** Metabase is the only second
+  BI tool actually run against ClickHouse. The report names each tool's status separately.
+- **The four agent frameworks do not coexist.** CrewAI needs its own virtualenv; the
+  portability check drives it as a subprocess and says so.
+- **The experiment analysis is a simulation.** It tests the estimator — assignment, power,
+  CUPED, false positives — not interference, novelty effects or ratio metrics.
 - **The agent does not join across tables.** A question that needs two tables is refused.
   Adding joins means declaring relationships in the registry, which is a design task.
 - **Encryption at rest and secret scanning are declared gaps** in the control register
