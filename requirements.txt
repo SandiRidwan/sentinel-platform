@@ -37,7 +37,19 @@ confluent-kafka==2.12.0
 # --- agent ---
 # LangGraph for the explicit plan/act/verify control flow, sqlglot for the dialect
 # transpile check in transform/warehouse_parity.py.
-langgraph==0.6.11
+#
+# The other two framework SDKs are here because agents/portability.py imports them, and a
+# portability check that only runs on the machine where the packages happen to be installed
+# proves nothing in CI. They are pinned to the versions the 30-case comparison actually
+# passed on; a floating version here would make the check non-reproducible, which is the
+# exact property it is meant to demonstrate.
+#
+# CrewAI is deliberately NOT here: its pins do not resolve with langgraph/langchain-core, so
+# it runs from its own virtualenv as a subprocess (see docs/adr/0018 and the note in
+# agents/portability.py). CI therefore runs three frameworks and says so.
+langgraph==1.0.10
+langchain-core==1.6.12
+llama-index-core==0.14.5
 sqlglot==30.24.0
 
 # --- service / api ---
