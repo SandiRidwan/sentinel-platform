@@ -24,7 +24,7 @@ log = get_logger("s3")
 def s3_client():
     """A path-style S3 client pointed at the configured endpoint."""
     settings = get_settings()
-    return boto3.client(
+    client = boto3.client(
         "s3",
         endpoint_url=settings.s3.endpoint_url,
         aws_access_key_id=settings.s3.access_key_id,
@@ -39,6 +39,25 @@ def s3_client():
             read_timeout=20,
         ),
     )
+    # Drop `Expect: 100-continue` on every request.
+    #
+    # boto3 adds that header to PUT/POST. s3mock 5.2.3 closes the connection instead of
+    # answering it, so boto3 reports `ConnectionClosedError` while the object is in fact
+    # written: a PUT that looks like a failure and leaves the data behind. GET is unaffected,
+    # which is why this first appeared as a read error. curl does not send the header by
+    # default, which is how it was isolated.
+    #
+    # The header is added late, so this has to run on `before-send`, not `before-call`: at
+    # before-call the header dict is still empty. botocore passes `request` as a keyword here,
+    # which is why the signature is `request=None` rather than positional.
+    # Expect is not part of the SigV4 canonical request, so removing it is safe for real S3.
+    def _drop_expect_header(request=None, **_kwargs):
+        headers = getattr(request, "headers", None)
+        if headers is not None:
+            headers.pop("Expect", None)
+
+    client.meta.events.register_last("before-send.s3.*", _drop_expect_header)
+    return client
 
 
 def ensure_buckets() -> list[str]:
