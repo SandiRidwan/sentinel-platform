@@ -358,6 +358,25 @@ def render_all(spec: dict, out: Path = OUT) -> dict[str, bytes]:
         rendered[name] = value if kind == "bytes" else value.encode("utf-8")
     return rendered
 
+def comparable(name: str, content: bytes) -> object:
+    """What `--check` compares, which is not always the bytes on disk.
+
+    The zip is the reason this function exists. Its *content* is a pure function of the
+    spec, but its *compressed bytes* are not: zipfile delegates compression to zlib, and
+    different zlib builds (zlib vs zlib-ng, different levels, different SIMD paths) produce
+    different output for identical input. Comparing raw bytes therefore reported the Superset
+    bundle as stale on GitHub's Python while it was byte-identical on the machine that
+    rendered it — the check was testing the zlib build, not the definition.
+
+    So the comparison is on content: entry names and decompressed entry bytes. That still
+    catches the failure the check exists for (spec edited, definitions not re-rendered),
+    and it does not fail because CI compresses differently.
+    """
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            return sorted((entry, archive.read(entry)) for entry in archive.namelist())
+    return content
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render the dashboard spec into four formats.")
     parser.add_argument("--check", action="store_true", help="fail if a rendered file differs")
@@ -372,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, content in rendered.items():
         target = out / name
         if args.check:
-            if not target.exists() or target.read_bytes() != content:
+            if not target.exists() or comparable(name, target.read_bytes()) != comparable(name, content):
                 stale.append(name)
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
